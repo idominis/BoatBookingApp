@@ -95,3 +95,12 @@ main {
         right: 0.75rem;
         top: 0.5rem;
     }
+
+.my-custom-switch .mud-switch-checked .mud-switch-track {
+    opacity: 0.5;
+    background-color: var(--mud-palette-primary) !important;
+}
+
+.my-custom-switch .mud-switch-checked .mud-switch-thumb {
+    background-color: var(--mud-palette-primary) !important;
+}

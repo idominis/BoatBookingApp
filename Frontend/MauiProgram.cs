@@ -1,6 +1,5 @@
-﻿using BoatBookingApp.Frontend.Services;
-using BoatBookingApp.Frontend.Shared.Services;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
+using MudBlazor.Services;
 
 namespace BoatBookingApp.Frontend
 {
@@ -16,10 +15,8 @@ namespace BoatBookingApp.Frontend
                     fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                 });
 
-            // Add device-specific services used by the BoatBookingApp.Frontend.Shared project
-            builder.Services.AddSingleton<IFormFactor, FormFactor>();
-
             builder.Services.AddMauiBlazorWebView();
+            builder.Services.AddMudServices();
 
 #if DEBUG
             builder.Services.AddBlazorWebViewDeveloperTools();
