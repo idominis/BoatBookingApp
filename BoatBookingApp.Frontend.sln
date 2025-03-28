@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.13.35919.96
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BoatBookingApp.Frontend.Shared", "BoatBookingApp.Frontend.Shared\BoatBookingApp.Frontend.Shared.csproj", "{2895214E-3A70-4FE3-AB4D-CB3575E8A144}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BoatBookingApp.Frontend", "Frontend\BoatBookingApp.Frontend.csproj", "{AEC62530-5E18-2B99-83C6-651240FAA2E7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2895214E-3A70-4FE3-AB4D-CB3575E8A144}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2895214E-3A70-4FE3-AB4D-CB3575E8A144}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2895214E-3A70-4FE3-AB4D-CB3575E8A144}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2895214E-3A70-4FE3-AB4D-CB3575E8A144}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AEC62530-5E18-2B99-83C6-651240FAA2E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AEC62530-5E18-2B99-83C6-651240FAA2E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AEC62530-5E18-2B99-83C6-651240FAA2E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AEC62530-5E18-2B99-83C6-651240FAA2E7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {66151960-01C8-4692-91C7-D8DB73FF9A4D}
+	EndGlobalSection
+EndGlobal
