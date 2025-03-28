@@ -1,16 +1,7 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">BoatBookingApp.Frontend</a>
-    </div>
-</div>
+﻿@using MudBlazor
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
-
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="flex-column">
-        <NavLink class="nav-link" href="boat-booking">
-            <span class="oi oi-list-rich" aria-hidden="true"></span> Rezervacija glisera
-        </NavLink>
-    </nav>
-</div>
-
+<MudNavMenu>
+    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Home">Home</MudNavLink>
+    <MudNavLink Href="boat-booking" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.DirectionsBoat">Boat Booking</MudNavLink>
+    <MudNavLink Href="transfer-booking" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.DirectionsCar">Transfer Booking</MudNavLink>
+</MudNavMenu>

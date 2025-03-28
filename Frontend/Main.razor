@@ -1,19 +1,22 @@
 ﻿@using Microsoft.AspNetCore.Components.Routing
+@using BoatBookingApp.Frontend.Shared
+@using BoatBookingApp.Frontend.Shared.Pages
 @using MudBlazor
-@using BoatBookingApp.Frontend.Shared.Layout
+@using Microsoft.AspNetCore.Components.Web
 
 <MudThemeProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
+<MudPopoverProvider />
 
 <Router AppAssembly="@typeof(Main).Assembly" AdditionalAssemblies="new[] { typeof(BoatBookingApp.Frontend.Shared.Pages.BoatBookingForm).Assembly }">
     <Found Context="routeData">
-        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
-        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        <RouteView RouteData="routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
     <NotFound>
         <PageTitle>Not found</PageTitle>
-        <LayoutView Layout="@typeof(MainLayout)">
+        <LayoutView Layout="typeof(MainLayout)">
             <p role="alert">Sorry, there's nothing at this address.</p>
         </LayoutView>
     </NotFound>

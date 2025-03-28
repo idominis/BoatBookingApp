@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using BoatBookingApp.Frontend.Shared;
+using Microsoft.Extensions.Logging;
 using MudBlazor.Services;
 
 namespace BoatBookingApp.Frontend

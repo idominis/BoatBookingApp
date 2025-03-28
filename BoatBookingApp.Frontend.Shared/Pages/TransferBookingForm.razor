@@ -1,0 +1,57 @@
+﻿@page "/transfer-booking"
+@using BoatBookingApp.Frontend.Shared.Models
+@using MudBlazor
+
+<MudContainer MaxWidth="MaxWidth.Medium">
+    <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
+
+    <MudForm @ref="form">
+        <MudSwitch T="bool" @bind-Checked="booking.WithReTour"
+                   Color="Color.Primary"
+                   Label="With ReTour"
+                   Class="my-custom-switch" />
+
+        <MudDatePicker Label="Departure Date" @bind-Value="booking.DepartureDate" Required="true" />
+        <MudTimePicker Label="Departure Time" @bind-Value="booking.DepartureTime" Required="true" />
+
+        <MudDatePicker Label="ReTour Date" @bind-Value="booking.ReTourDate"
+                       Disabled="!booking.WithReTour" Required="@booking.WithReTour" />
+        <MudTimePicker Label="ReTour Time" @bind-Value="booking.ReTourTime"
+                       Disabled="!booking.WithReTour" Required="@booking.WithReTour" />
+
+        <MudTextField Label="Departure Location" @bind-Value="booking.DepartureLocation" Required="true" />
+        <MudTextField Label="Arrival Location" @bind-Value="booking.ArrivalLocation" Required="true" />
+
+        <MudNumericField @bind-Value="booking.PassengerCount" Label="Number of Passengers" Min="1" Required="true" />
+
+        <MudSwitch T="bool" @bind-Checked="booking.Luggage"
+                   Color="Color.Primary"
+                   Label="Luggage"
+                   Class="my-custom-switch" />
+
+        <MudSwitch T="bool" @bind-Checked="booking.FuelIncluded"
+                   Color="Color.Primary"
+                   Label="Fuel Included"
+                   Class="my-custom-switch" />
+
+        <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
+        <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(form == null || !form.IsValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
+    </MudForm>
+</MudContainer>
+
+@code {
+    private MudForm? form;
+    private TransferBooking booking = new TransferBooking
+        {
+            Luggage = true,
+            FuelIncluded = true,
+            WithReTour = true
+        };
+
+    private void Submit()
+    {
+        Console.WriteLine($"Transfer booking sent: Total price: {booking.TotalPrice}");
+    }
+}
