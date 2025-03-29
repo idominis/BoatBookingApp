@@ -1,5 +1,6 @@
 ﻿@inherits LayoutComponentBase
 @using MudBlazor
+@using BoatBookingApp.Frontend.Shared.Models
 
 <MudThemeProvider />
 <MudDialogProvider />
@@ -9,6 +10,16 @@
     <MudAppBar Elevation="1">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())" />
         <MudText Typo="Typo.h5" Class="ml-3">Boat Booking App</MudText>
+        <MudSpacer />
+        <MudToolBarContent Class="d-flex justify-end">
+            <MudSelect T="string" Label="Booker" Value="@selectedBookerShortName" ValueChanged="@((string shortName) => OnBookerChanged(shortName))"
+                       Dense="true" Variant="Variant.Text" Class="compact-select">
+                @foreach (var booker in bookers)
+                {
+                    <MudSelectItem Value="@booker.ShortName">@booker.ShortName</MudSelectItem>
+                }
+            </MudSelect>
+        </MudToolBarContent>
     </MudAppBar>
     <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
         <NavMenu />
@@ -20,9 +31,46 @@
 
 @code {
     bool _drawerOpen = true;
+    private string selectedBookerShortName = "ID";
+    private List<Booker> bookers = new List<Booker>
+    {
+        new Booker { Id = 1, Name = "Ivan Dominis", ShortName = "ID" },
+        new Booker { Id = 2, Name = "Filip Barisis", ShortName = "FB" }
+    };
 
     void DrawerToggle()
     {
         _drawerOpen = !_drawerOpen;
     }
+
+    void OnBookerChanged(string shortName)
+    {
+        selectedBookerShortName = shortName;
+        Console.WriteLine($"Odabrani buker: {shortName}");
+    }
 }
+
+<style>
+    .compact-select {
+        width: 80px !important; /* Fiksna širina za ovaj specifični dropdown */
+        max-width: 80px !important; /* Sprječava širenje iznad 80px */
+        min-width: 50px; /* Minimalna širina */
+        margin-right: 8px; /* Razmak od ruba */
+    }
+
+    .compact-select .mud-input-control {
+        width: 80px !important; /* Fiksna širina input polja */
+        max-width: 80px !important; /* Sprječava širenje input polja */
+    }
+
+    .compact-select .mud-select-input {
+        color: white !important;
+        font-weight: bold !important;
+        text-align: center !important;
+    }
+
+    .compact-select .mud-select-item {
+        color: black !important;
+        font-weight: bold !important;
+    }
+</style>

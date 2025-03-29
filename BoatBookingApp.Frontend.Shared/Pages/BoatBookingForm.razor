@@ -1,27 +1,29 @@
 ﻿@page "/"
 @page "/boat-booking"
+@using Microsoft.EntityFrameworkCore
 @using BoatBookingApp.Frontend.Shared.Models
 @using BoatBookingApp.Frontend.Shared.Layout
 @using MudBlazor
+@using System.Threading.Tasks
+@using BoatBookingApp.Frontend.Shared.Data
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Boat Booking</MudText>
 
     <MudForm @ref="form">
-        <MudSelect T="string" Label="Speedboat Name" @bind-Value="booking.BoatName" Required="true">
+        <MudSelect T="string" Label="Speedboat Name" @bind-Value="booking.BoatName" Required="true" Class="wide-select">
             @foreach (var boat in boats)
             {
                 <MudSelectItem Value="@boat.Name">@boat.Name</MudSelectItem>
             }
         </MudSelect>
 
-        <MudSwitch T="bool" @bind-Checked="booking.IsMultiDay"
-                   Color="Color.Primary"
-                   Label="Multiple Days Rent"
-                   Class="my-custom-switch" />
+        <MudSwitch T="bool" @bind-Checked="booking.IsMultiDay" ValueChanged="OnMultiDayChanged"
+                   Color="Color.Primary" Label="Multiple Days Rent" Class="my-custom-switch" />
 
         <MudDatePicker Label="Start Date" @bind-Date="booking.StartDate" Required="true" />
-        <MudDatePicker Label="End Date" @bind-Date="booking.EndDate" Required="true" />
+        <MudDatePicker Label="End Date" @bind-Date="booking.EndDate"
+                       Disabled="!booking.IsMultiDay" Required="@booking.IsMultiDay" />
 
         <MudNumericField @bind-Value="booking.PassengerCount" Label="Number of Passengers" Min="1" Required="true" />
 
@@ -29,20 +31,15 @@
         <MudTimePicker Label="Return Time" @bind-Time="booking.ReturnTime" Required="true" />
 
         <MudSwitch T="bool" @bind-Checked="booking.SkipperRequired"
-                   Color="Color.Primary"
-                   Label="Skipper Required"
-                   Class="my-custom-switch" />
+                   Color="Color.Primary" Label="Skipper Required" Class="my-custom-switch" />
         <MudSwitch T="bool" @bind-Checked="booking.FuelIncluded"
-                   Color="Color.Primary"
-                   Label="Fuel Included"
-                   Class="my-custom-switch" />
+                   Color="Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
 
-        <MudSelect T="string" Label="Extras" MultiSelection="true"
-                   SelectedValues="_selectedExtras"
-                   SelectedValuesChanged="OnSelectedExtrasChanged">
+        <MudSelect T="Extra" Label="Extras" MultiSelection="true" ToStringFunc="@(e => e.Name)"
+                   SelectedValues="_selectedExtras" SelectedValuesChanged="OnSelectedExtrasChanged">
             @foreach (var extra in extras)
             {
-                <MudSelectItem Value="@extra">@extra</MudSelectItem>
+                <MudSelectItem Value="@extra">@extra.Name</MudSelectItem>
             }
         </MudSelect>
 
@@ -54,29 +51,55 @@
 </MudContainer>
 
 @code {
-    private MudForm form;
+    [Inject]
+    public BoatBookingContext DbContext { get; set; }
+
+    private MudForm? form;
     private BoatBooking booking = new BoatBooking
         {
-            Extras = new List<string>(),
             StartDate = DateTime.Today,
-            EndDate = DateTime.Today
+            EndDate = DateTime.Today,
+            IsMultiDay = false,
+            BookingExtras = new List<BookingExtra>()
         };
-    private List<Boat> boats = new List<Boat>
-    {
-        new Boat { Id = 1, Name = "Gliser 1", Capacity = 6, BasicPrice = 100m },
-        new Boat { Id = 2, Name = "Gliser 2", Capacity = 8, BasicPrice = 150m }
-    };
-    private List<string> extras = new List<string> { "IceBox", "Snorkels", "Something else" };
-    private IEnumerable<string> _selectedExtras = new List<string>();
+    private List<Boat> boats = new List<Boat>();
+    private List<Extra> extras = new List<Extra>();
+    private IEnumerable<Extra> _selectedExtras = new List<Extra>();
 
-    private void OnSelectedExtrasChanged(IEnumerable<string> newValue)
+    protected override async Task OnInitializedAsync()
     {
-        _selectedExtras = newValue;
-        booking.Extras = newValue.ToList();
+        boats = await DbContext.Boats.ToListAsync();
+        extras = await DbContext.Extras.ToListAsync();
     }
 
-    private void Submit()
+    private void OnSelectedExtrasChanged(IEnumerable<Extra> newValue)
     {
+        _selectedExtras = newValue;
+        booking.BookingExtras = newValue.Select(e => new BookingExtra { ExtraId = e.Id, Extra = e }).ToList();
+    }
+
+    private void OnMultiDayChanged(bool value)
+    {
+        booking.IsMultiDay = value;
+        StateHasChanged();
+    }
+
+    private async Task Submit()
+    {
+        // Spremi booking u bazu
+        DbContext.Bookings.Add(booking);
+        await DbContext.SaveChangesAsync();
         Console.WriteLine($"Booking sent: {booking.BoatName}, Total price: {booking.TotalPrice}");
     }
 }
+
+<style>
+    .wide-select {
+        width: 300px;
+    }
+
+        .wide-select .mud-input-control {
+            width: 300px;
+        }
+</style>
+
