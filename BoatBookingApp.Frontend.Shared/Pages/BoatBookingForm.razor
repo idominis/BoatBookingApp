@@ -7,12 +7,11 @@
 @using System.Threading.Tasks
 @using BoatBookingApp.Frontend.Shared.Data
 @using BoatBookingApp.Frontend.Shared.Services
-@inject IDbContextFactory<BoatBookingContext> DbContextFactory
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Boat Booking</MudText>
 
-    <MudForm @ref="form">
+    <MudForm @ref="form" @bind-IsValid="@isFormValid">
         <MudSelect T="string" Label="Speedboat Name" @bind-Value="booking.BoatName" Required="true" Class="wide-select">
             @foreach (var boat in boats)
             {
@@ -24,8 +23,10 @@
                    Color="Color.Primary" Label="Multiple Days Rent" Class="my-custom-switch" />
 
         <MudDatePicker Label="Start Date" @bind-Date="booking.StartDate" Required="true" />
-        <MudDatePicker Label="End Date" @bind-Date="booking.EndDate"
-                       Disabled="!booking.IsMultiDay" Required="@booking.IsMultiDay" />
+        @if (booking.IsMultiDay)
+        {
+            <MudDatePicker Label="End Date" @bind-Date="booking.EndDate" Required="true" />
+        }
 
         <MudNumericField @bind-Value="booking.PassengerCount" Label="Number of Passengers" Min="1" Required="true" />
 
@@ -45,20 +46,35 @@
             }
         </MudSelect>
 
+        <MudGrid>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
+            </MudItem>
+        </MudGrid>
+
         <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
         <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
 
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(form == null || !form.IsValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
     </MudForm>
 </MudContainer>
 
 @code {
+    [Inject]
+    public IDbContextFactory<BoatBookingContext> DbContextFactory { get; set; }
     [Inject]
     public ISnackbar Snackbar { get; set; }
     [Inject]
     public BookerStateService BookerState { get; set; }
 
     private MudForm? form;
+    private bool isFormValid;
     private BoatBooking booking = new BoatBooking
         {
             StartDate = DateTime.Today,
@@ -73,19 +89,23 @@
     protected override async Task OnInitializedAsync()
     {
         using var dbContext = DbContextFactory.CreateDbContext();
-        boats = await dbContext.Boats.ToListAsync();
-        extras = await dbContext.Extras.ToListAsync();
+        boats = await dbContext.Boats.AsNoTracking().ToListAsync();
+        extras = await dbContext.Extras.AsNoTracking().ToListAsync();
     }
 
     private void OnSelectedExtrasChanged(IEnumerable<Extra> newValue)
     {
         _selectedExtras = newValue;
-        booking.BookingExtras = newValue.Select(e => new BookingExtra { ExtraId = e.Id, Extra = e }).ToList();
+        booking.BookingExtras = newValue.Select(e => new BookingExtra { ExtraId = e.Id }).ToList();
     }
 
     private void OnMultiDayChanged(bool value)
     {
         booking.IsMultiDay = value;
+        if (!value)
+        {
+            booking.EndDate = null; // Resetiraj EndDate kada je Multiple Days Rent isključen
+        }
         StateHasChanged();
     }
 
@@ -107,6 +127,7 @@
         {
             using var dbContext = DbContextFactory.CreateDbContext();
             var selectedBooker = await dbContext.Bookers
+                .AsNoTracking()
                 .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
             if (selectedBooker != null)
             {

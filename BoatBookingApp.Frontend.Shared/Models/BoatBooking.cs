@@ -27,5 +27,8 @@ namespace BoatBookingApp.Frontend.Shared.Models
         public int? BookerId { get; set; }
         public Booker Booker { get; set; }
         public ICollection<BookingExtra> BookingExtras { get; set; } = new List<BookingExtra>();
+        public string RenterName { get; set; } = string.Empty;
+        public string RenterEmail { get; set; } = string.Empty;
+        public string RenterPhone { get; set; } = string.Empty;
     }
 }

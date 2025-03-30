@@ -1,57 +1,206 @@
 ﻿@page "/transfer-booking"
+@using Microsoft.EntityFrameworkCore
 @using BoatBookingApp.Frontend.Shared.Models
 @using MudBlazor
+@using BoatBookingApp.Frontend.Shared.Data
+@using BoatBookingApp.Frontend.Shared.Services
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
 
-    <MudForm @ref="form">
-        <MudSwitch T="bool" @bind-Checked="booking.WithReTour"
-                   Color="Color.Primary"
-                   Label="With ReTour"
-                   Class="my-custom-switch" />
+    <MudForm @ref="form" @bind-IsValid="@isFormValid">
+        <MudSwitch T="bool" Value="withReTour" ValueChanged="OnWithReTourChanged"
+                   Color="Color.Primary" Label="With ReTour" Class="my-custom-switch" />
 
-        <MudDatePicker Label="Departure Date" @bind-Value="booking.DepartureDate" Required="true" />
-        <MudTimePicker Label="Departure Time" @bind-Value="booking.DepartureTime" Required="true" />
+        <MudDatePicker Label="Departure Date" @bind-Date="booking.DepartureDate" Required="true" />
+        <MudTimePicker Label="Departure Time" @bind-Time="booking.DepartureTime" Required="true" />
 
-        <MudDatePicker Label="ReTour Date" @bind-Value="booking.ReTourDate"
-                       Disabled="!booking.WithReTour" Required="@booking.WithReTour" />
-        <MudTimePicker Label="ReTour Time" @bind-Value="booking.ReTourTime"
-                       Disabled="!booking.WithReTour" Required="@booking.WithReTour" />
+        @if (withReTour)
+        {
+            <MudDatePicker Label="ReTour Date" @bind-Date="booking.ReTourDate" Required="true" />
+            <MudTimePicker Label="ReTour Time" @bind-Time="booking.ReTourTime" Required="true" />
+        }
 
-        <MudTextField Label="Departure Location" @bind-Value="booking.DepartureLocation" Required="true" />
-        <MudTextField Label="Arrival Location" @bind-Value="booking.ArrivalLocation" Required="true" />
+        <MudSelect T="int?" Label="Departure Location" @bind-Value="selectedDepartureLocationId" Required="false" Class="wide-select"
+                   ToStringFunc="@(id => id == null ? "Custom" : locations.FirstOrDefault(l => l.Id == id)?.Name ?? "")">
+            <MudSelectItem Value="@((int?)null)">Custom</MudSelectItem>
+            @foreach (var location in locations)
+            {
+                <MudSelectItem Value="@((int?)location.Id)">@location.Name</MudSelectItem>
+            }
+        </MudSelect>
+        @if (selectedDepartureLocationId == null)
+        {
+            <MudGrid>
+                <MudItem xs="6">
+                    <MudTextField Label="Custom Departure Location" @bind-Value="booking.CustomDepartureLocation" Required="true" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudTextField Label="Custom Departure Name" @bind-Value="booking.CustomDepartureLocationName" Required="true" />
+                </MudItem>
+            </MudGrid>
+        }
+
+        <MudSelect T="int?" Label="Arrival Location" @bind-Value="selectedArrivalLocationId" Required="false" Class="wide-select"
+                   ToStringFunc="@(id => id == null ? "Custom" : locations.FirstOrDefault(l => l.Id == id)?.Name ?? "")">
+            <MudSelectItem Value="@((int?)null)">Custom</MudSelectItem>
+            @foreach (var location in locations)
+            {
+                <MudSelectItem Value="@((int?)location.Id)">@location.Name</MudSelectItem>
+            }
+        </MudSelect>
+        @if (selectedArrivalLocationId == null)
+        {
+            <MudGrid>
+                <MudItem xs="6">
+                    <MudTextField Label="Custom Arrival Location" @bind-Value="booking.CustomArrivalLocation" Required="true" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudTextField Label="Custom Arrival Name" @bind-Value="booking.CustomArrivalLocationName" Required="true" />
+                </MudItem>
+            </MudGrid>
+        }
 
         <MudNumericField @bind-Value="booking.PassengerCount" Label="Number of Passengers" Min="1" Required="true" />
 
-        <MudSwitch T="bool" @bind-Checked="booking.Luggage"
-                   Color="Color.Primary"
-                   Label="Luggage"
-                   Class="my-custom-switch" />
+        <MudSwitch T="bool" Value="luggage" ValueChanged="OnLuggageChanged"
+                   Color="Color.Primary" Label="Luggage" Class="my-custom-switch" />
 
-        <MudSwitch T="bool" @bind-Checked="booking.FuelIncluded"
-                   Color="Color.Primary"
-                   Label="Fuel Included"
-                   Class="my-custom-switch" />
+        <MudSwitch T="bool" Value="fuelIncluded" ValueChanged="OnFuelIncludedChanged"
+                   Color="Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
+
+        <MudGrid>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
+            </MudItem>
+        </MudGrid>
 
         <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
         <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
 
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(form == null || !form.IsValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
     </MudForm>
 </MudContainer>
 
 @code {
-    private MudForm? form;
-    private TransferBooking booking = new TransferBooking
-        {
-            Luggage = true,
-            FuelIncluded = true,
-            WithReTour = true
-        };
+    [Inject]
+    public IDbContextFactory<BoatBookingContext> DbContextFactory { get; set; }
+    [Inject]
+    public ISnackbar Snackbar { get; set; }
+    [Inject]
+    public BookerStateService BookerState { get; set; }
 
-    private void Submit()
+    private MudForm? form;
+    private bool isFormValid;
+    private TransferBooking booking;
+
+    private bool withReTour = false;
+    private bool luggage = true;
+    private bool fuelIncluded = true;
+    private List<Location> locations = new List<Location>();
+    private int? selectedDepartureLocationId;
+    private int? selectedArrivalLocationId;
+
+    protected override async Task OnInitializedAsync()
     {
-        Console.WriteLine($"Transfer booking sent: Total price: {booking.TotalPrice}");
+        booking = new TransferBooking
+            {
+                WithReTour = withReTour,
+                Luggage = luggage,
+                FuelIncluded = fuelIncluded
+            };
+
+        using var dbContext = DbContextFactory.CreateDbContext();
+        locations = await dbContext.Locations.AsNoTracking().ToListAsync();
+    }
+
+    private void OnWithReTourChanged(bool value)
+    {
+        withReTour = value;
+        booking.WithReTour = value;
+        if (!value)
+        {
+            booking.ReTourDate = null;
+            booking.ReTourTime = null;
+        }
+        StateHasChanged();
+        Console.WriteLine($"WithReTour changed to: {value}");
+    }
+
+    private void OnLuggageChanged(bool value)
+    {
+        luggage = value;
+        booking.Luggage = value;
+        Console.WriteLine($"Luggage changed to: {value}");
+    }
+
+    private void OnFuelIncludedChanged(bool value)
+    {
+        fuelIncluded = value;
+        booking.FuelIncluded = value;
+        Console.WriteLine($"FuelIncluded changed to: {value}");
+    }
+
+    private async Task Submit()
+    {
+        try
+        {
+            using var dbContext = DbContextFactory.CreateDbContext();
+            var selectedBooker = await dbContext.Bookers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
+            if (selectedBooker != null)
+            {
+                booking.BookerId = selectedBooker.Id;
+            }
+
+            booking.DepartureLocationId = selectedDepartureLocationId;
+            if (selectedDepartureLocationId == null)
+            {
+                booking.CustomDepartureLocation = booking.CustomDepartureLocation ?? string.Empty;
+                booking.CustomDepartureLocationName = booking.CustomDepartureLocationName ?? string.Empty;
+            }
+            else
+            {
+                booking.CustomDepartureLocation = null;
+                booking.CustomDepartureLocationName = null;
+            }
+
+            booking.ArrivalLocationId = selectedArrivalLocationId;
+            if (selectedArrivalLocationId == null)
+            {
+                booking.CustomArrivalLocation = booking.CustomArrivalLocation ?? string.Empty;
+                booking.CustomArrivalLocationName = booking.CustomArrivalLocationName ?? string.Empty;
+            }
+            else
+            {
+                booking.CustomArrivalLocation = null;
+                booking.CustomArrivalLocationName = null;
+            }
+
+            dbContext.TransferBookings.Add(booking);
+            await dbContext.SaveChangesAsync();
+            Snackbar.Add("Sent Successfully!", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
+        }
     }
 }
+
+<style>
+    .wide-select {
+        width: 300px;
+    }
+
+        .wide-select .mud-input-control {
+            width: 300px;
+        }
+</style>
