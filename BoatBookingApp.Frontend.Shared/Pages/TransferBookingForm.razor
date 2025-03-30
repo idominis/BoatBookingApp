@@ -6,6 +6,7 @@
 @using BoatBookingApp.Frontend.Shared.Services
 @using Xceed.Words.NET
 @using System.IO
+@using System.Globalization
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
@@ -208,24 +209,58 @@
                     throw new FileNotFoundException("Template file not found.", templatePath);
                 }
 
+                string outputFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}.docx";
+                string outputPath;
+
+                // Dinamički podfolder
+                string pickUpLocation = selectedDepartureLocationId.HasValue
+                    ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
+                    : booking.CustomDepartureLocationName ?? "N/A";
+                string dropOffLocation = selectedArrivalLocationId.HasValue
+                    ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
+                    : booking.CustomArrivalLocationName ?? "N/A";
+                string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
+                string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
+                string subFolderName = $"{booking.Id}_Transfer_{pickUpLocation}-{dropOffLocation}_{departureDateStr}_{renterName}";
+
+                // Pokušaj spremanja na OneDrive
+                try
+                {
+                    string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
+                    string subFolderPath = Path.Combine(basePath, subFolderName);
+                    Directory.CreateDirectory(subFolderPath);
+                    outputPath = Path.Combine(subFolderPath, outputFileName);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
+                    string fallbackBasePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
+                    string fallbackSubFolderPath = Path.Combine(fallbackBasePath, subFolderName);
+                    Directory.CreateDirectory(fallbackSubFolderPath);
+                    outputPath = Path.Combine(fallbackSubFolderPath, outputFileName);
+                }
+
                 using (var doc = DocX.Load(templatePath))
                 {
                     // Zamjena mjestozaštitnika
                     doc.ReplaceText("{ContactName}", booking.RenterName ?? "Guest");
                     doc.ReplaceText("{ContactPhone}", booking.RenterPhone ?? "N/A");
-                    doc.ReplaceText("{PickUpLocation}", selectedDepartureLocationId.HasValue
-                        ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
-                        : booking.CustomDepartureLocationName ?? "N/A");
-                    doc.ReplaceText("{PickUpMapLink}", selectedDepartureLocationId.HasValue
+
+                    doc.ReplaceText("{PickUpLocation}", pickUpLocation);
+                    string pickUpMapLink = selectedDepartureLocationId.HasValue
                         ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link ?? "N/A"
-                        : booking.CustomDepartureLocation ?? "N/A");
-                    doc.ReplaceText("{DropOffLocation}", selectedArrivalLocationId.HasValue
-                        ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
-                        : booking.CustomArrivalLocationName ?? "N/A");
-                    doc.ReplaceText("{DropOffMapLink}", selectedArrivalLocationId.HasValue
+                        : booking.CustomDepartureLocation ?? "N/A";
+                    ReplaceTextWithHyperlink(doc, "{PickUpMapLink}", pickUpMapLink, pickUpMapLink);
+
+                    doc.ReplaceText("{DropOffLocation}", dropOffLocation);
+                    string dropOffMapLink = selectedArrivalLocationId.HasValue
                         ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
-                        : booking.CustomArrivalLocation ?? "N/A");
-                    doc.ReplaceText("{Date}", booking.DepartureDate?.ToString("d MMMM yyyy") ?? "N/A");
+                        : booking.CustomArrivalLocation ?? "N/A";
+                    ReplaceTextWithHyperlink(doc, "{DropOffMapLink}", dropOffMapLink, dropOffMapLink);
+
+                    string dateWithOrdinal = GetDateWithOrdinal(booking.DepartureDate);
+                    doc.ReplaceText("{Date}", dateWithOrdinal ?? "N/A");
+
                     doc.ReplaceText("{Time}", booking.DepartureTime?.ToString(@"hh\:mm") ?? "N/A");
                     doc.ReplaceText("{PassengerCount}", booking.PassengerCount.ToString());
                     doc.ReplaceText("{SkipperStatus}", "Included in the price"); // Pretpostavka za transfer
@@ -235,11 +270,12 @@
                     doc.ReplaceText("{Deposit}", $"{booking.DepositPaid}€");
                     doc.ReplaceText("{RemainingAmount}", $"{booking.TotalPrice - booking.DepositPaid}€");
 
-                    // Privremeni ispis za testiranje - dokument još ne spremamo
-                    Console.WriteLine("Document generated successfully (not saved yet).");
+                    // Spremanje dokumenta
+                    doc.SaveAs(outputPath);
+                    Console.WriteLine($"Document saved to: {outputPath}");
                 }
 
-                Snackbar.Add("Booking saved and document generated (TBD)", Severity.Info);
+                Snackbar.Add($"Booking saved and document generated at: {outputPath}", Severity.Info);
                 Snackbar.Add("Sent Successfully!", Severity.Success);
             }
             else
@@ -251,6 +287,44 @@
         {
             Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
         }
+    }
+
+    private void ReplaceTextWithHyperlink(DocX doc, string placeholder, string displayText, string url)
+    {
+        foreach (var paragraph in doc.Paragraphs)
+        {
+            if (paragraph.Text.Contains(placeholder))
+            {
+                var hyperlink = doc.AddHyperlink(displayText, new Uri(url));
+                paragraph.ReplaceText(placeholder, "");
+                paragraph.AppendHyperlink(hyperlink);
+            }
+        }
+    }
+
+    private string GetDateWithOrdinal(DateTime? date)
+    {
+        if (!date.HasValue) return null;
+
+        int day = date.Value.Day;
+        string suffix;
+        switch (day % 10)
+        {
+            case 1 when day != 11:
+                suffix = "st";
+                break;
+            case 2 when day != 12:
+                suffix = "nd";
+                break;
+            case 3 when day != 13:
+                suffix = "rd";
+                break;
+            default:
+                suffix = "th";
+                break;
+        }
+
+        return date.Value.ToString($"MMMM d'{suffix}', yyyy", CultureInfo.GetCultureInfo("en-US"));
     }
 }
 
