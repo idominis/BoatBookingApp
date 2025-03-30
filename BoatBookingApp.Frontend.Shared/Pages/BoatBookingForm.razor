@@ -113,7 +113,7 @@
                 booking.BookerId = selectedBooker.Id;
             }
 
-            dbContext.Bookings.Add(booking);
+            dbContext.BoatBookings.Add(booking);
             await dbContext.SaveChangesAsync();
             Snackbar.Add("Sent Successfully!", Severity.Success);
         }

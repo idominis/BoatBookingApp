@@ -7,7 +7,7 @@ namespace BoatBookingApp.Frontend.Shared.Data
     {
         public DbSet<Boat> Boats { get; set; }
         public DbSet<Booker> Bookers { get; set; }
-        public DbSet<BoatBooking> Bookings { get; set; }
+        public DbSet<BoatBooking> BoatBookings { get; set; }
         public DbSet<Extra> Extras { get; set; }
         public DbSet<BookingExtra> BookingExtras { get; set; }
 
