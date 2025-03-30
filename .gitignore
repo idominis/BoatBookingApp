@@ -58,3 +58,6 @@ obj/
 *.user
 *.suo
 _workspaces.db
+
+# Ignore appsettings.json
+appsettings.json
