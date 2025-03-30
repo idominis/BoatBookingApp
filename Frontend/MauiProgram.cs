@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using MudBlazor.Services;
 using Microsoft.Extensions.Configuration;
+using BoatBookingApp.Frontend.Shared.Services;
 
 namespace BoatBookingApp.Frontend
 {
@@ -25,15 +26,15 @@ namespace BoatBookingApp.Frontend
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                 .Build();
 
-            // Get connection string from configuration
             string connectionString = configuration.GetConnectionString("DefaultConnection");
 
             builder.Services.AddMauiBlazorWebView();
             builder.Services.AddMudServices();
 
-            // Add BoatBookingContext to DI container
-            builder.Services.AddDbContext<BoatBookingContext>(options =>
+            builder.Services.AddDbContextFactory<BoatBookingContext>(options =>
                   options.UseMySQL(connectionString));
+
+            builder.Services.AddSingleton<BookerStateService>();
 
 #if DEBUG
             builder.Services.AddBlazorWebViewDeveloperTools();

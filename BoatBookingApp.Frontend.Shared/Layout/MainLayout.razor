@@ -1,6 +1,9 @@
 ﻿@inherits LayoutComponentBase
 @using MudBlazor
 @using BoatBookingApp.Frontend.Shared.Models
+@using BoatBookingApp.Frontend.Shared.Services
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<BoatBookingContext> DbContextFactory
 
 <MudThemeProvider />
 <MudDialogProvider />
@@ -12,7 +15,7 @@
         <MudText Typo="Typo.h5" Class="ml-3">Boat Booking App</MudText>
         <MudSpacer />
         <MudToolBarContent Class="d-flex justify-end">
-            <MudSelect T="string" Label="Booker" Value="@selectedBookerShortName" ValueChanged="@((string shortName) => OnBookerChanged(shortName))"
+            <MudSelect T="string" Label="Booker" Value="@BookerState.SelectedBookerShortName" ValueChanged="@((string shortName) => OnBookerChanged(shortName))"
                        Dense="true" Variant="Variant.Text" Class="compact-select">
                 @foreach (var booker in bookers)
                 {
@@ -30,13 +33,23 @@
 </MudLayout>
 
 @code {
+    [Inject]
+    public BookerStateService BookerState { get; set; }
+
     bool _drawerOpen = true;
-    private string selectedBookerShortName = "ID";
-    private List<Booker> bookers = new List<Booker>
+    private List<Booker> bookers = new List<Booker>();
+
+    protected override async Task OnInitializedAsync()
     {
-        new Booker { Id = 1, Name = "Ivan Dominis", ShortName = "ID" },
-        new Booker { Id = 2, Name = "Filip Barisis", ShortName = "FB" }
-    };
+        using var dbContext = DbContextFactory.CreateDbContext();
+        bookers = await dbContext.Bookers.ToListAsync();
+
+        var defaultBooker = bookers.FirstOrDefault(b => b.ShortName == "ID");
+        if (defaultBooker != null)
+        {
+            BookerState.SetSelectedBookerShortName("ID");
+        }
+    }
 
     void DrawerToggle()
     {
@@ -45,22 +58,22 @@
 
     void OnBookerChanged(string shortName)
     {
-        selectedBookerShortName = shortName;
+        BookerState.SetSelectedBookerShortName(shortName);
         Console.WriteLine($"Odabrani buker: {shortName}");
     }
 }
 
 <style>
     .compact-select {
-        width: 80px !important; /* Fiksna širina za ovaj specifični dropdown */
-        max-width: 80px !important; /* Sprječava širenje iznad 80px */
-        min-width: 50px; /* Minimalna širina */
-        margin-right: 8px; /* Razmak od ruba */
+        width: 80px !important;
+        max-width: 80px !important;
+        min-width: 50px;
+        margin-right: 8px;
     }
 
     .compact-select .mud-input-control {
-        width: 80px !important; /* Fiksna širina input polja */
-        max-width: 80px !important; /* Sprječava širenje input polja */
+        width: 80px !important;
+        max-width: 80px !important;
     }
 
     .compact-select .mud-select-input {

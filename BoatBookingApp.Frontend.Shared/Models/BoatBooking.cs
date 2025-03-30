@@ -23,7 +23,9 @@ namespace BoatBookingApp.Frontend.Shared.Models
         public bool SkipperRequired { get; set; }
         public bool FuelIncluded { get; set; }
         public decimal TotalPrice { get; set; }
-        public decimal DepositPaid { get; set; }
+        public decimal DepositPaid { get; set; }     
+        public int? BookerId { get; set; }
+        public Booker Booker { get; set; }
         public ICollection<BookingExtra> BookingExtras { get; set; } = new List<BookingExtra>();
     }
 }

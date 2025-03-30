@@ -6,7 +6,8 @@
 @using MudBlazor
 @using System.Threading.Tasks
 @using BoatBookingApp.Frontend.Shared.Data
-@using MudBlazor.Services
+@using BoatBookingApp.Frontend.Shared.Services
+@inject IDbContextFactory<BoatBookingContext> DbContextFactory
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Boat Booking</MudText>
@@ -31,9 +32,9 @@
         <MudTimePicker Label="Pickup Time" @bind-Time="booking.PickupTime" Required="true" />
         <MudTimePicker Label="Return Time" @bind-Time="booking.ReturnTime" Required="true" />
 
-        <MudSwitch T="bool" @bind-Checked="booking.SkipperRequired"
+        <MudSwitch T="bool" @bind-Checked="booking.SkipperRequired" ValueChanged="OnSkipperRequiredChanged"
                    Color="Color.Primary" Label="Skipper Required" Class="my-custom-switch" />
-        <MudSwitch T="bool" @bind-Checked="booking.FuelIncluded"
+        <MudSwitch T="bool" @bind-Checked="booking.FuelIncluded" ValueChanged="OnFuelIncludedChanged"
                    Color="Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
 
         <MudSelect T="Extra" Label="Extras" MultiSelection="true" ToStringFunc="@(e => e.Name)"
@@ -53,9 +54,9 @@
 
 @code {
     [Inject]
-    public BoatBookingContext DbContext { get; set; }
-    [Inject]
     public ISnackbar Snackbar { get; set; }
+    [Inject]
+    public BookerStateService BookerState { get; set; }
 
     private MudForm? form;
     private BoatBooking booking = new BoatBooking
@@ -71,8 +72,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        boats = await DbContext.Boats.ToListAsync();
-        extras = await DbContext.Extras.ToListAsync();
+        using var dbContext = DbContextFactory.CreateDbContext();
+        boats = await dbContext.Boats.ToListAsync();
+        extras = await dbContext.Extras.ToListAsync();
     }
 
     private void OnSelectedExtrasChanged(IEnumerable<Extra> newValue)
@@ -87,13 +89,32 @@
         StateHasChanged();
     }
 
+    private void OnSkipperRequiredChanged(bool value)
+    {
+        booking.SkipperRequired = value;
+        Console.WriteLine($"SkipperRequired changed to: {value}");
+    }
+
+    private void OnFuelIncludedChanged(bool value)
+    {
+        booking.FuelIncluded = value;
+        Console.WriteLine($"FuelIncluded changed to: {value}");
+    }
+
     private async Task Submit()
     {
         try
         {
-            // Spremi booking u bazu
-            DbContext.Bookings.Add(booking);
-            await DbContext.SaveChangesAsync();
+            using var dbContext = DbContextFactory.CreateDbContext();
+            var selectedBooker = await dbContext.Bookers
+                .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
+            if (selectedBooker != null)
+            {
+                booking.BookerId = selectedBooker.Id;
+            }
+
+            dbContext.Bookings.Add(booking);
+            await dbContext.SaveChangesAsync();
             Snackbar.Add("Sent Successfully!", Severity.Success);
         }
         catch (Exception ex)
@@ -112,4 +133,3 @@
             width: 300px;
         }
 </style>
-
