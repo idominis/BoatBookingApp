@@ -4,6 +4,8 @@
 @using MudBlazor
 @using BoatBookingApp.Frontend.Shared.Data
 @using BoatBookingApp.Frontend.Shared.Services
+@using Xceed.Words.NET
+@using System.IO
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
@@ -84,6 +86,8 @@
         <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
         <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
 
+        <MudCheckBox T="bool" @bind-Checked="generateDocument" ValueChanged="OnGenerateDocumentChanged" Label="Generate Confirmation Document" />
+
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
     </MudForm>
 </MudContainer>
@@ -103,6 +107,7 @@
     private bool withReTour = false;
     private bool luggage = true;
     private bool fuelIncluded = true;
+    private bool generateDocument = false; // Defaultno isključen
     private List<Location> locations = new List<Location>();
     private int? selectedDepartureLocationId;
     private int? selectedArrivalLocationId;
@@ -147,6 +152,12 @@
         Console.WriteLine($"FuelIncluded changed to: {value}");
     }
 
+    private void OnGenerateDocumentChanged(bool value)
+    {
+        generateDocument = value;
+        Console.WriteLine($"GenerateDocument changed to: {value}");
+    }
+
     private async Task Submit()
     {
         try
@@ -186,7 +197,55 @@
 
             dbContext.TransferBookings.Add(booking);
             await dbContext.SaveChangesAsync();
-            Snackbar.Add("Sent Successfully!", Severity.Success);
+
+            Console.WriteLine($"Submit - generateDocument value: {generateDocument}");
+            if (generateDocument)
+            {
+                // Generiranje dokumenta
+                string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
+                if (!File.Exists(templatePath))
+                {
+                    throw new FileNotFoundException("Template file not found.", templatePath);
+                }
+
+                using (var doc = DocX.Load(templatePath))
+                {
+                    // Zamjena mjestozaštitnika
+                    doc.ReplaceText("{ContactName}", booking.RenterName ?? "Guest");
+                    doc.ReplaceText("{ContactPhone}", booking.RenterPhone ?? "N/A");
+                    doc.ReplaceText("{PickUpLocation}", selectedDepartureLocationId.HasValue
+                        ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
+                        : booking.CustomDepartureLocationName ?? "N/A");
+                    doc.ReplaceText("{PickUpMapLink}", selectedDepartureLocationId.HasValue
+                        ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link ?? "N/A"
+                        : booking.CustomDepartureLocation ?? "N/A");
+                    doc.ReplaceText("{DropOffLocation}", selectedArrivalLocationId.HasValue
+                        ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
+                        : booking.CustomArrivalLocationName ?? "N/A");
+                    doc.ReplaceText("{DropOffMapLink}", selectedArrivalLocationId.HasValue
+                        ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
+                        : booking.CustomArrivalLocation ?? "N/A");
+                    doc.ReplaceText("{Date}", booking.DepartureDate?.ToString("d MMMM yyyy") ?? "N/A");
+                    doc.ReplaceText("{Time}", booking.DepartureTime?.ToString(@"hh\:mm") ?? "N/A");
+                    doc.ReplaceText("{PassengerCount}", booking.PassengerCount.ToString());
+                    doc.ReplaceText("{SkipperStatus}", "Included in the price"); // Pretpostavka za transfer
+                    doc.ReplaceText("{LuggageStatus}", booking.Luggage ? "Included in the price" : "Not included");
+                    doc.ReplaceText("{FuelStatus}", booking.FuelIncluded ? "Included in the price" : "Not included");
+                    doc.ReplaceText("{TotalPrice}", $"{booking.TotalPrice}€");
+                    doc.ReplaceText("{Deposit}", $"{booking.DepositPaid}€");
+                    doc.ReplaceText("{RemainingAmount}", $"{booking.TotalPrice - booking.DepositPaid}€");
+
+                    // Privremeni ispis za testiranje - dokument još ne spremamo
+                    Console.WriteLine("Document generated successfully (not saved yet).");
+                }
+
+                Snackbar.Add("Booking saved and document generated (TBD)", Severity.Info);
+                Snackbar.Add("Sent Successfully!", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Sent Successfully!", Severity.Success);
+            }
         }
         catch (Exception ex)
         {
