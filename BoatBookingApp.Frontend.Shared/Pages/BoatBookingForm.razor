@@ -6,6 +6,7 @@
 @using MudBlazor
 @using System.Threading.Tasks
 @using BoatBookingApp.Frontend.Shared.Data
+@using MudBlazor.Services
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Boat Booking</MudText>
@@ -53,6 +54,8 @@
 @code {
     [Inject]
     public BoatBookingContext DbContext { get; set; }
+    [Inject]
+    public ISnackbar Snackbar { get; set; }
 
     private MudForm? form;
     private BoatBooking booking = new BoatBooking
@@ -86,10 +89,17 @@
 
     private async Task Submit()
     {
-        // Spremi booking u bazu
-        DbContext.Bookings.Add(booking);
-        await DbContext.SaveChangesAsync();
-        Console.WriteLine($"Booking sent: {booking.BoatName}, Total price: {booking.TotalPrice}");
+        try
+        {
+            // Spremi booking u bazu
+            DbContext.Bookings.Add(booking);
+            await DbContext.SaveChangesAsync();
+            Snackbar.Add("Sent Successfully!", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
+        }
     }
 }
 
