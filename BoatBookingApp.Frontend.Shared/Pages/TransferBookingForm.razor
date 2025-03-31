@@ -202,15 +202,12 @@
             Console.WriteLine($"Submit - generateDocument value: {generateDocument}");
             if (generateDocument)
             {
-                // Generiranje dokumenta
+                // Generiranje dokumenata
                 string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
                 if (!File.Exists(templatePath))
                 {
                     throw new FileNotFoundException("Template file not found.", templatePath);
                 }
-
-                string outputFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}.docx";
-                string outputPath;
 
                 // Dinamički podfolder
                 string pickUpLocation = selectedDepartureLocationId.HasValue
@@ -222,60 +219,47 @@
                 string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
                 string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
                 string subFolderName = $"{booking.Id}_Transfer_{pickUpLocation}-{dropOffLocation}_{departureDateStr}_{renterName}";
+                string subFolderPath;
 
                 // Pokušaj spremanja na OneDrive
                 try
                 {
                     string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
-                    string subFolderPath = Path.Combine(basePath, subFolderName);
+                    subFolderPath = Path.Combine(basePath, subFolderName);
                     Directory.CreateDirectory(subFolderPath);
-                    outputPath = Path.Combine(subFolderPath, outputFileName);
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
                     string fallbackBasePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
-                    string fallbackSubFolderPath = Path.Combine(fallbackBasePath, subFolderName);
-                    Directory.CreateDirectory(fallbackSubFolderPath);
-                    outputPath = Path.Combine(fallbackSubFolderPath, outputFileName);
+                    subFolderPath = Path.Combine(fallbackBasePath, subFolderName);
+                    Directory.CreateDirectory(subFolderPath);
                 }
 
-                using (var doc = DocX.Load(templatePath))
+                // Generiranje Tour dokumenta
+                string tourFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}_Tour.docx";
+                string tourOutputPath = Path.Combine(subFolderPath, tourFileName);
+                string pickUpMapLink = selectedDepartureLocationId.HasValue
+                    ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link ?? "N/A"
+                    : booking.CustomDepartureLocation ?? "N/A";
+                string dropOffMapLink = selectedArrivalLocationId.HasValue
+                    ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
+                    : booking.CustomArrivalLocation ?? "N/A";
+                GenerateDocument(templatePath, tourOutputPath, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, booking.DepartureDate, booking.DepartureTime);
+
+                // Generiranje ReTour dokumenta ako je withReTour uključen
+                if (withReTour)
                 {
-                    // Zamjena mjestozaštitnika
-                    doc.ReplaceText("{ContactName}", booking.RenterName ?? "Guest");
-                    doc.ReplaceText("{ContactPhone}", booking.RenterPhone ?? "N/A");
-
-                    doc.ReplaceText("{PickUpLocation}", pickUpLocation);
-                    string pickUpMapLink = selectedDepartureLocationId.HasValue
-                        ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link ?? "N/A"
-                        : booking.CustomDepartureLocation ?? "N/A";
-                    ReplaceTextWithHyperlink(doc, "{PickUpMapLink}", pickUpMapLink, pickUpMapLink);
-
-                    doc.ReplaceText("{DropOffLocation}", dropOffLocation);
-                    string dropOffMapLink = selectedArrivalLocationId.HasValue
-                        ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
-                        : booking.CustomArrivalLocation ?? "N/A";
-                    ReplaceTextWithHyperlink(doc, "{DropOffMapLink}", dropOffMapLink, dropOffMapLink);
-
-                    string dateWithOrdinal = GetDateWithOrdinal(booking.DepartureDate);
-                    doc.ReplaceText("{Date}", dateWithOrdinal ?? "N/A");
-
-                    doc.ReplaceText("{Time}", booking.DepartureTime?.ToString(@"hh\:mm") ?? "N/A");
-                    doc.ReplaceText("{PassengerCount}", booking.PassengerCount.ToString());
-                    doc.ReplaceText("{SkipperStatus}", "Included in the price"); // Pretpostavka za transfer
-                    doc.ReplaceText("{LuggageStatus}", booking.Luggage ? "Included in the price" : "Not included");
-                    doc.ReplaceText("{FuelStatus}", booking.FuelIncluded ? "Included in the price" : "Not included");
-                    doc.ReplaceText("{TotalPrice}", $"{booking.TotalPrice}€");
-                    doc.ReplaceText("{Deposit}", $"{booking.DepositPaid}€");
-                    doc.ReplaceText("{RemainingAmount}", $"{booking.TotalPrice - booking.DepositPaid}€");
-
-                    // Spremanje dokumenta
-                    doc.SaveAs(outputPath);
-                    Console.WriteLine($"Document saved to: {outputPath}");
+                    string reTourFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}_ReTour.docx";
+                    string reTourOutputPath = Path.Combine(subFolderPath, reTourFileName);
+                    GenerateDocument(templatePath, reTourOutputPath, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, booking.ReTourDate, booking.ReTourTime);
+                    Snackbar.Add($"Booking saved and documents generated at: {tourOutputPath} and {reTourOutputPath}", Severity.Info);
+                }
+                else
+                {
+                    Snackbar.Add($"Booking saved and document generated at: {tourOutputPath}", Severity.Info);
                 }
 
-                Snackbar.Add($"Booking saved and document generated at: {outputPath}", Severity.Info);
                 Snackbar.Add("Sent Successfully!", Severity.Success);
             }
             else
@@ -286,6 +270,31 @@
         catch (Exception ex)
         {
             Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void GenerateDocument(string templatePath, string outputPath, string pickUpLocation, string dropOffLocation, string pickUpMapLink, string dropOffMapLink, DateTime? date, TimeSpan? time)
+    {
+        using (var doc = DocX.Load(templatePath))
+        {
+            doc.ReplaceText("{ContactName}", booking.RenterName ?? "Guest");
+            doc.ReplaceText("{ContactPhone}", booking.RenterPhone ?? "N/A");
+            doc.ReplaceText("{PickUpLocation}", pickUpLocation);
+            ReplaceTextWithHyperlink(doc, "{PickUpMapLink}", pickUpMapLink, pickUpMapLink);
+            doc.ReplaceText("{DropOffLocation}", dropOffLocation);
+            ReplaceTextWithHyperlink(doc, "{DropOffMapLink}", dropOffMapLink, dropOffMapLink);
+            doc.ReplaceText("{Date}", GetDateWithOrdinal(date) ?? "N/A");
+            doc.ReplaceText("{Time}", time?.ToString(@"hh\:mm") ?? "N/A");
+            doc.ReplaceText("{PassengerCount}", booking.PassengerCount.ToString());
+            doc.ReplaceText("{SkipperStatus}", "Included in the price"); // Pretpostavka za transfer
+            doc.ReplaceText("{LuggageStatus}", booking.Luggage ? "Included in the price" : "Not included");
+            doc.ReplaceText("{FuelStatus}", booking.FuelIncluded ? "Included in the price" : "Not included");
+            doc.ReplaceText("{TotalPrice}", $"{booking.TotalPrice}€");
+            doc.ReplaceText("{Deposit}", $"{booking.DepositPaid}€");
+            doc.ReplaceText("{RemainingAmount}", $"{booking.TotalPrice - booking.DepositPaid}€");
+
+            doc.SaveAs(outputPath);
+            Console.WriteLine($"Document saved to: {outputPath}");
         }
     }
 
