@@ -228,7 +228,7 @@
                 string baseFileName = $"BookingConfirmation_{booking.Id}{DateTime.Now:yyyyMMdd_HHmmss}";
                 string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
                 string renterName = booking.RenterName?.Replace(" ", "") ?? "Guest";
-                string subFolderName = $"{booking.Id}Transfer{pickUpLocation}-{dropOffLocation}{departureDateStr}{renterName}";
+                string subFolderName = $"{booking.Id}_Transfer_{pickUpLocation}-{dropOffLocation}_{departureDateStr}_{renterName}";
 
                 string basePath;
                 try
