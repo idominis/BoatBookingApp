@@ -4,16 +4,12 @@
 @using MudBlazor
 @using BoatBookingApp.Frontend.Shared.Data
 @using BoatBookingApp.Frontend.Shared.Services
-@using Xceed.Words.NET
-@using System.IO
-@using System.Globalization
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
-
     <MudForm @ref="form" @bind-IsValid="@isFormValid">
         <MudSwitch T="bool" Value="withReTour" ValueChanged="OnWithReTourChanged"
-                   Color="Color.Primary" Label="With ReTour" Class="my-custom-switch" />
+                   Color="MudBlazor.Color.Primary" Label="With ReTour" Class="my-custom-switch" />
 
         <MudDatePicker Label="Departure Date" @bind-Date="booking.DepartureDate" Required="true" />
         <MudTimePicker Label="Departure Time" @bind-Time="booking.DepartureTime" Required="true" />
@@ -67,29 +63,20 @@
         <MudNumericField @bind-Value="booking.PassengerCount" Label="Number of Passengers" Min="1" Required="true" />
 
         <MudSwitch T="bool" Value="luggage" ValueChanged="OnLuggageChanged"
-                   Color="Color.Primary" Label="Luggage" Class="my-custom-switch" />
+                   Color="MudBlazor.Color.Primary" Label="Luggage" Class="my-custom-switch" />
 
         <MudSwitch T="bool" Value="fuelIncluded" ValueChanged="OnFuelIncludedChanged"
-                   Color="Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
+                   Color="MudBlazor.Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
 
-        <MudGrid>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
-            </MudItem>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
-            </MudItem>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
-            </MudItem>
-        </MudGrid>
-
+        <MudGrid> <MudItem xs="4"> <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" /> </MudItem> </MudGrid>
         <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
         <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
 
         <MudCheckBox T="bool" @bind-Checked="generateDocument" ValueChanged="OnGenerateDocumentChanged" Label="Generate Confirmation Document" />
 
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
+        <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="@(isLoading ? "display: block; margin: 20px auto;" : "display: none;")" />
+
+        <MudButton Variant="Variant.Filled" Color="MudBlazor.Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
     </MudForm>
 </MudContainer>
 
@@ -100,6 +87,10 @@
     public ISnackbar Snackbar { get; set; }
     [Inject]
     public BookerStateService BookerState { get; set; }
+    [Inject]
+    public GoogleSheetsService GoogleSheetsService { get; set; }
+    [Inject]
+    public DocumentGenerationService DocumentGenerationService { get; set; }
 
     private MudForm? form;
     private bool isFormValid;
@@ -108,10 +99,11 @@
     private bool withReTour = false;
     private bool luggage = true;
     private bool fuelIncluded = true;
-    private bool generateDocument = false; // Defaultno isključen
+    private bool generateDocument = false;
     private List<Location> locations = new List<Location>();
     private int? selectedDepartureLocationId;
     private int? selectedArrivalLocationId;
+    private bool isLoading = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -165,8 +157,8 @@
         {
             using var dbContext = DbContextFactory.CreateDbContext();
             var selectedBooker = await dbContext.Bookers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
             if (selectedBooker != null)
             {
                 booking.BookerId = selectedBooker.Id;
@@ -202,64 +194,92 @@
             Console.WriteLine($"Submit - generateDocument value: {generateDocument}");
             if (generateDocument)
             {
-                // Generiranje dokumenata
-                string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
-                if (!File.Exists(templatePath))
+                isLoading = true;
+                StateHasChanged(); // Prikazati MudProgressCircular
+
+                // Dohvati podatke za Google Sheet i Word dokument
+                string pickUpLocation = selectedDepartureLocationId.HasValue
+                ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
+                : booking.CustomDepartureLocationName ?? "N/A";
+                string dropOffLocation = selectedArrivalLocationId.HasValue
+                ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
+                : booking.CustomArrivalLocationName ?? "N/A";
+                string shortName = BookerState.SelectedBookerShortName ?? "N/A";
+                string pickUpMapLink = selectedDepartureLocationId.HasValue
+                ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link ?? "N/A"
+                : booking.CustomDepartureLocation ?? "N/A";
+                string dropOffMapLink = selectedArrivalLocationId.HasValue
+                ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
+                : booking.CustomArrivalLocation ?? "N/A";
+
+                // Upis u Google Sheet prije generiranja Word dokumenata
+                await GoogleSheetsService.UpdateGoogleSheet(booking.DepartureDate.Value, pickUpLocation, dropOffLocation, booking.PassengerCount, booking.DepartureTime, shortName);
+                Snackbar.Add("GoogleSheet filled successfully!", Severity.Success);
+
+                if (withReTour)
                 {
-                    throw new FileNotFoundException("Template file not found.", templatePath);
+                    await GoogleSheetsService.UpdateGoogleSheet(booking.ReTourDate.Value, dropOffLocation, pickUpLocation, booking.PassengerCount, booking.ReTourTime, shortName);
+                    Snackbar.Add("GoogleSheet (ReTour) filled successfully!", Severity.Success);
                 }
 
-                // Dinamički podfolder
-                string pickUpLocation = selectedDepartureLocationId.HasValue
-                    ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
-                    : booking.CustomDepartureLocationName ?? "N/A";
-                string dropOffLocation = selectedArrivalLocationId.HasValue
-                    ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
-                    : booking.CustomArrivalLocationName ?? "N/A";
-                string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
-                string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
-                string subFolderName = $"{booking.Id}_Transfer_{pickUpLocation}-{dropOffLocation}_{departureDateStr}_{renterName}";
-                string subFolderPath;
 
-                // Pokušaj spremanja na OneDrive
+                // Generiranje dokumenata
+                string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
+                string baseFileName = $"BookingConfirmation_{booking.Id}{DateTime.Now:yyyyMMdd_HHmmss}";
+                string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
+                string renterName = booking.RenterName?.Replace(" ", "") ?? "Guest";
+                string subFolderName = $"{booking.Id}Transfer{pickUpLocation}-{dropOffLocation}{departureDateStr}{renterName}";
+
+                string basePath;
                 try
                 {
-                    string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
-                    subFolderPath = Path.Combine(basePath, subFolderName);
+                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
+                    string subFolderPath = Path.Combine(basePath, subFolderName);
                     Directory.CreateDirectory(subFolderPath);
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
-                    string fallbackBasePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
-                    subFolderPath = Path.Combine(fallbackBasePath, subFolderName);
+                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
+                    string subFolderPath = Path.Combine(basePath, subFolderName);
                     Directory.CreateDirectory(subFolderPath);
                 }
 
                 // Generiranje Tour dokumenta
-                string tourFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}_Tour.docx";
-                string tourOutputPath = Path.Combine(subFolderPath, tourFileName);
-                string pickUpMapLink = selectedDepartureLocationId.HasValue
-                    ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link ?? "N/A"
-                    : booking.CustomDepartureLocation ?? "N/A";
-                string dropOffMapLink = selectedArrivalLocationId.HasValue
-                    ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
-                    : booking.CustomArrivalLocation ?? "N/A";
-                GenerateDocument(templatePath, tourOutputPath, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, booking.DepartureDate, booking.DepartureTime);
+                string tourFileName = $"{baseFileName}_Tour.docx";
+                string tourOutputPath = Path.Combine(basePath, subFolderName, tourFileName);
+                DocumentGenerationService.GenerateDocument(booking, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, locations, templatePath, tourOutputPath);
 
                 // Generiranje ReTour dokumenta ako je withReTour uključen
+                string generatedPaths = $"Tour document generated at: {tourOutputPath}";
                 if (withReTour)
                 {
-                    string reTourFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}_ReTour.docx";
-                    string reTourOutputPath = Path.Combine(subFolderPath, reTourFileName);
-                    GenerateDocument(templatePath, reTourOutputPath, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, booking.ReTourDate, booking.ReTourTime);
-                    Snackbar.Add($"Booking saved and documents generated at: {tourOutputPath} and {reTourOutputPath}", Severity.Info);
-                }
-                else
-                {
-                    Snackbar.Add($"Booking saved and document generated at: {tourOutputPath}", Severity.Info);
+                    string reTourFileName = $"{baseFileName}_ReTour.docx";
+                    string reTourOutputPath = Path.Combine(basePath, subFolderName, reTourFileName);
+
+                    // Kreiraj kopiju booking objekta s ReTour podacima
+                    var reTourBooking = new TransferBooking
+                        {
+                            RenterName = booking.RenterName,
+                            RenterPhone = booking.RenterPhone,
+                            RenterEmail = booking.RenterEmail,
+                            DepartureDate = booking.ReTourDate,
+                            DepartureTime = booking.ReTourTime,
+                            PassengerCount = booking.PassengerCount,
+                            Luggage = booking.Luggage,
+                            FuelIncluded = booking.FuelIncluded,
+                            TotalPrice = booking.TotalPrice,
+                            DepositPaid = booking.DepositPaid
+                        };
+
+                    DocumentGenerationService.GenerateDocument(reTourBooking, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, locations, templatePath, reTourOutputPath);
+                    generatedPaths += $"\nReTour document generated at: {reTourOutputPath}";
                 }
 
+                isLoading = false;
+                StateHasChanged(); // Sakriti MudProgressCircular
+
+                Snackbar.Add($"Booking saved and documents generated:\n{generatedPaths}", Severity.Info);
                 Snackbar.Add("Sent Successfully!", Severity.Success);
             }
             else
@@ -269,80 +289,10 @@
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
+            isLoading = false;
+            StateHasChanged(); // Sakriti MudProgressCircular u slučaju greške
+            Console.WriteLine($"Greška u Submit: {ex.Message}, InnerException: {ex.InnerException?.Message}");
+            Snackbar.Add($"Sent Error: {ex.Message}, Inner: {ex.InnerException?.Message}", Severity.Error);
         }
-    }
-
-    private void GenerateDocument(string templatePath, string outputPath, string pickUpLocation, string dropOffLocation, string pickUpMapLink, string dropOffMapLink, DateTime? date, TimeSpan? time)
-    {
-        using (var doc = DocX.Load(templatePath))
-        {
-            doc.ReplaceText("{ContactName}", booking.RenterName ?? "Guest");
-            doc.ReplaceText("{ContactPhone}", booking.RenterPhone ?? "N/A");
-            doc.ReplaceText("{PickUpLocation}", pickUpLocation);
-            ReplaceTextWithHyperlink(doc, "{PickUpMapLink}", pickUpMapLink, pickUpMapLink);
-            doc.ReplaceText("{DropOffLocation}", dropOffLocation);
-            ReplaceTextWithHyperlink(doc, "{DropOffMapLink}", dropOffMapLink, dropOffMapLink);
-            doc.ReplaceText("{Date}", GetDateWithOrdinal(date) ?? "N/A");
-            doc.ReplaceText("{Time}", time?.ToString(@"hh\:mm") ?? "N/A");
-            doc.ReplaceText("{PassengerCount}", booking.PassengerCount.ToString());
-            doc.ReplaceText("{SkipperStatus}", "Included in the price"); // Pretpostavka za transfer
-            doc.ReplaceText("{LuggageStatus}", booking.Luggage ? "Included in the price" : "Not included");
-            doc.ReplaceText("{FuelStatus}", booking.FuelIncluded ? "Included in the price" : "Not included");
-            doc.ReplaceText("{TotalPrice}", $"{booking.TotalPrice}€");
-            doc.ReplaceText("{Deposit}", $"{booking.DepositPaid}€");
-            doc.ReplaceText("{RemainingAmount}", $"{booking.TotalPrice - booking.DepositPaid}€");
-
-            doc.SaveAs(outputPath);
-            Console.WriteLine($"Document saved to: {outputPath}");
-        }
-    }
-
-    private void ReplaceTextWithHyperlink(DocX doc, string placeholder, string displayText, string url)
-    {
-        foreach (var paragraph in doc.Paragraphs)
-        {
-            if (paragraph.Text.Contains(placeholder))
-            {
-                var hyperlink = doc.AddHyperlink(displayText, new Uri(url));
-                paragraph.ReplaceText(placeholder, "");
-                paragraph.AppendHyperlink(hyperlink);
-            }
-        }
-    }
-
-    private string GetDateWithOrdinal(DateTime? date)
-    {
-        if (!date.HasValue) return null;
-
-        int day = date.Value.Day;
-        string suffix;
-        switch (day % 10)
-        {
-            case 1 when day != 11:
-                suffix = "st";
-                break;
-            case 2 when day != 12:
-                suffix = "nd";
-                break;
-            case 3 when day != 13:
-                suffix = "rd";
-                break;
-            default:
-                suffix = "th";
-                break;
-        }
-
-        return date.Value.ToString($"MMMM d'{suffix}', yyyy", CultureInfo.GetCultureInfo("en-US"));
     }
 }
-
-<style>
-    .wide-select {
-        width: 300px;
-    }
-
-        .wide-select .mud-input-control {
-            width: 300px;
-        }
-</style>
