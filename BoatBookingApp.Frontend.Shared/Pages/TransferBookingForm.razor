@@ -7,6 +7,7 @@
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
+
     <MudForm @ref="form" @bind-IsValid="@isFormValid">
         <MudSwitch T="bool" Value="withReTour" ValueChanged="OnWithReTourChanged"
                    Color="MudBlazor.Color.Primary" Label="With ReTour" Class="my-custom-switch" />
@@ -68,14 +69,24 @@
         <MudSwitch T="bool" Value="fuelIncluded" ValueChanged="OnFuelIncludedChanged"
                    Color="MudBlazor.Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
 
-        <MudGrid> <MudItem xs="4"> <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" /> </MudItem> </MudGrid>
+        <MudGrid>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
+            </MudItem>
+        </MudGrid>
+
         <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
         <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
 
         <MudCheckBox T="bool" @bind-Checked="generateDocument" ValueChanged="OnGenerateDocumentChanged" Label="Generate Confirmation Document" />
 
         <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="@(isLoading ? "display: block; margin: 20px auto;" : "display: none;")" />
-
         <MudButton Variant="Variant.Filled" Color="MudBlazor.Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
     </MudForm>
 </MudContainer>
@@ -100,10 +111,10 @@
     private bool luggage = true;
     private bool fuelIncluded = true;
     private bool generateDocument = false;
+    private bool isLoading = false;
     private List<Location> locations = new List<Location>();
     private int? selectedDepartureLocationId;
     private int? selectedArrivalLocationId;
-    private bool isLoading = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -155,6 +166,9 @@
     {
         try
         {
+            isLoading = true;
+            StateHasChanged(); // Prikazati MudProgressCircular
+
             using var dbContext = DbContextFactory.CreateDbContext();
             var selectedBooker = await dbContext.Bookers
             .AsNoTracking()
@@ -194,9 +208,6 @@
             Console.WriteLine($"Submit - generateDocument value: {generateDocument}");
             if (generateDocument)
             {
-                isLoading = true;
-                StateHasChanged(); // Prikazati MudProgressCircular
-
                 // Dohvati podatke za Google Sheet i Word dokument
                 string pickUpLocation = selectedDepartureLocationId.HasValue
                 ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
@@ -212,16 +223,14 @@
                 ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
                 : booking.CustomArrivalLocation ?? "N/A";
 
-                // Upis u Google Sheet prije generiranja Word dokumenata
+                // Upis u Google Sheet (oba lista)
                 await GoogleSheetsService.UpdateGoogleSheet(booking.DepartureDate.Value, pickUpLocation, dropOffLocation, booking.PassengerCount, booking.DepartureTime, shortName);
-                Snackbar.Add("GoogleSheet filled successfully!", Severity.Success);
-
+                await GoogleSheetsService.UpdateEvidenceSheet(booking, pickUpLocation, dropOffLocation, shortName, false); // Tour
                 if (withReTour)
                 {
                     await GoogleSheetsService.UpdateGoogleSheet(booking.ReTourDate.Value, dropOffLocation, pickUpLocation, booking.PassengerCount, booking.ReTourTime, shortName);
-                    Snackbar.Add("GoogleSheet (ReTour) filled successfully!", Severity.Success);
+                    await GoogleSheetsService.UpdateEvidenceSheet(booking, pickUpLocation, dropOffLocation, shortName, true); // ReTour
                 }
-
 
                 // Generiranje dokumenata
                 string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
@@ -276,14 +285,45 @@
                     generatedPaths += $"\nReTour document generated at: {reTourOutputPath}";
                 }
 
+                // Resetiranje forme nakon uspješnog slanja
+                booking = new TransferBooking
+                    {
+                        WithReTour = false,
+                        Luggage = true,
+                        FuelIncluded = true
+                    };
+                withReTour = false;
+                luggage = true;
+                fuelIncluded = true;
+                generateDocument = false;
+                selectedDepartureLocationId = null;
+                selectedArrivalLocationId = null;
+                form?.ResetValidation(); // Resetiraj validaciju forme
                 isLoading = false;
-                StateHasChanged(); // Sakriti MudProgressCircular
+                StateHasChanged(); // Ažuriraj UI za sakrivanje spinners i reset forme
 
-                Snackbar.Add($"Booking saved and documents generated:\n{generatedPaths}", Severity.Info);
+                Snackbar.Add($"Booking saved, sheets (2025 and Evidencija) updated, and documents generated:\n{generatedPaths}", Severity.Info);
                 Snackbar.Add("Sent Successfully!", Severity.Success);
             }
             else
             {
+                // Resetiranje forme nakon uspješnog slanja bez dokumenata
+                booking = new TransferBooking
+                    {
+                        WithReTour = false,
+                        Luggage = true,
+                        FuelIncluded = true
+                    };
+                withReTour = false;
+                luggage = true;
+                fuelIncluded = true;
+                generateDocument = false;
+                selectedDepartureLocationId = null;
+                selectedArrivalLocationId = null;
+                form?.ResetValidation(); // Resetiraj validaciju forme
+                isLoading = false;
+                StateHasChanged(); // Ažuriraj UI za sakrivanje spinners i reset forme
+
                 Snackbar.Add("Sent Successfully!", Severity.Success);
             }
         }

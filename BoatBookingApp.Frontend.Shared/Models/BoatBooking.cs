@@ -30,5 +30,10 @@ namespace BoatBookingApp.Frontend.Shared.Models
         public string RenterName { get; set; } = string.Empty;
         public string RenterEmail { get; set; } = string.Empty;
         public string RenterPhone { get; set; } = string.Empty;
+
+        // Nova polja za Departure Location
+        public int? DepartureLocationId { get; set; }
+        public string? CustomDepartureLocation { get; set; }
+        public string? CustomDepartureLocationName { get; set; }
     }
 }

@@ -10,7 +10,6 @@
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Boat Booking</MudText>
-
     <MudForm @ref="form" @bind-IsValid="@isFormValid">
         <MudSelect T="string" Label="Speedboat Name" @bind-Value="booking.BoatName" Required="true" Class="wide-select">
             @foreach (var boat in boats)
@@ -38,6 +37,26 @@
         <MudSwitch T="bool" @bind-Checked="booking.FuelIncluded" ValueChanged="OnFuelIncludedChanged"
                    Color="Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
 
+        <MudSelect T="int?" Label="Departure Location" @bind-Value="selectedDepartureLocationId" Required="false" Class="wide-select"
+                   ToStringFunc="@(id => id == null ? "Custom" : locations.FirstOrDefault(l => l.Id == id)?.Name ?? "")">
+            <MudSelectItem Value="@((int?)null)">Custom</MudSelectItem>
+            @foreach (var location in locations)
+            {
+                <MudSelectItem Value="@((int?)location.Id)">@location.Name</MudSelectItem>
+            }
+        </MudSelect>
+        @if (selectedDepartureLocationId == null)
+        {
+            <MudGrid>
+                <MudItem xs="6">
+                    <MudTextField Label="Custom Departure Location" @bind-Value="booking.CustomDepartureLocation" Required="true" />
+                </MudItem>
+                <MudItem xs="6">
+                    <MudTextField Label="Custom Departure Name" @bind-Value="booking.CustomDepartureLocationName" Required="true" />
+                </MudItem>
+            </MudGrid>
+        }
+
         <MudSelect T="Extra" Label="Extras" MultiSelection="true" ToStringFunc="@(e => e.Name)"
                    SelectedValues="_selectedExtras" SelectedValuesChanged="OnSelectedExtrasChanged">
             @foreach (var extra in extras)
@@ -46,21 +65,11 @@
             }
         </MudSelect>
 
-        <MudGrid>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
-            </MudItem>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
-            </MudItem>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
-            </MudItem>
-        </MudGrid>
-
+        <MudGrid> <MudItem xs="4"> <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" /> </MudItem> </MudGrid>
         <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
         <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
 
+        <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="@(isLoading ? "display: block; margin: 20px auto;" : "display: none;")" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
     </MudForm>
 </MudContainer>
@@ -84,13 +93,25 @@
         };
     private List<Boat> boats = new List<Boat>();
     private List<Extra> extras = new List<Extra>();
+    private List<Location> locations = new List<Location>();
     private IEnumerable<Extra> _selectedExtras = new List<Extra>();
+    private int? selectedDepartureLocationId;
+    private bool isLoading = false;
 
     protected override async Task OnInitializedAsync()
     {
         using var dbContext = DbContextFactory.CreateDbContext();
         boats = await dbContext.Boats.AsNoTracking().ToListAsync();
         extras = await dbContext.Extras.AsNoTracking().ToListAsync();
+        locations = await dbContext.Locations.AsNoTracking().ToListAsync();
+
+        // Postavi defaultnu lokaciju "Hvar Port" ako postoji
+        var hvarPort = locations.FirstOrDefault(l => l.Name == "Hvar Port");
+        if (hvarPort != null)
+        {
+            selectedDepartureLocationId = hvarPort.Id;
+            booking.DepartureLocationId = hvarPort.Id;
+        }
     }
 
     private void OnSelectedExtrasChanged(IEnumerable<Extra> newValue)
@@ -104,7 +125,7 @@
         booking.IsMultiDay = value;
         if (!value)
         {
-            booking.EndDate = null; // Resetiraj EndDate kada je Multiple Days Rent isključen
+            booking.EndDate = null;
         }
         StateHasChanged();
     }
@@ -125,32 +146,61 @@
     {
         try
         {
+            isLoading = true;
+            StateHasChanged(); // Prikazati spinner
+
             using var dbContext = DbContextFactory.CreateDbContext();
             var selectedBooker = await dbContext.Bookers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
             if (selectedBooker != null)
             {
                 booking.BookerId = selectedBooker.Id;
             }
 
+            booking.DepartureLocationId = selectedDepartureLocationId;
+            if (selectedDepartureLocationId == null)
+            {
+                booking.CustomDepartureLocation = booking.CustomDepartureLocation ?? string.Empty;
+                booking.CustomDepartureLocationName = booking.CustomDepartureLocationName ?? string.Empty;
+            }
+            else
+            {
+                booking.CustomDepartureLocation = null;
+                booking.CustomDepartureLocationName = null;
+            }
+
             dbContext.BoatBookings.Add(booking);
             await dbContext.SaveChangesAsync();
+
+            // Resetiranje forme nakon uspješnog slanja
+            booking = new BoatBooking
+                {
+                    StartDate = DateTime.Today,
+                    EndDate = DateTime.Today,
+                    IsMultiDay = false,
+                    BookingExtras = new List<BookingExtra>()
+                };
+            _selectedExtras = new List<Extra>();
+            form?.ResetValidation(); // Resetiraj validaciju forme
+            isLoading = false;
+            StateHasChanged(); // Ažuriraj UI za sakrivanje spinners i reset forme
+
+            // Ponovno postavi defaultnu lokaciju "Hvar Port"
+            var hvarPort = locations.FirstOrDefault(l => l.Name == "Hvar Port");
+            if (hvarPort != null)
+            {
+                selectedDepartureLocationId = hvarPort.Id;
+                booking.DepartureLocationId = hvarPort.Id;
+            }
+
             Snackbar.Add("Sent Successfully!", Severity.Success);
         }
         catch (Exception ex)
         {
+            isLoading = false;
+            StateHasChanged(); // Sakriti spinner u slučaju greške
             Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
         }
     }
 }
-
-<style>
-    .wide-select {
-        width: 300px;
-    }
-
-        .wide-select .mud-input-control {
-            width: 300px;
-        }
-</style>
