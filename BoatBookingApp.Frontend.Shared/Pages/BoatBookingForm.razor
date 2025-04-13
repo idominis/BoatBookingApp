@@ -81,6 +81,8 @@
     public ISnackbar Snackbar { get; set; }
     [Inject]
     public BookerStateService BookerState { get; set; }
+    [Inject]
+    public GoogleSheetsService GoogleSheetsService { get; set; }
 
     private MudForm? form;
     private bool isFormValid;
@@ -173,6 +175,27 @@
             dbContext.BoatBookings.Add(booking);
             await dbContext.SaveChangesAsync();
 
+            // Upis u Google Sheet
+            string shortName = BookerState.SelectedBookerShortName ?? "N/A";
+            if (booking.IsMultiDay && booking.EndDate.HasValue)
+            {
+                // Upis za svaki dan od StartDate do EndDate
+                for (var date = booking.StartDate.Value; date <= booking.EndDate.Value; date = date.AddDays(1))
+                {
+                    // Upis u list "2025" za svaki dan
+                    await GoogleSheetsService.UpdateGoogleSheet(date, null, null, booking.PassengerCount, booking.PickupTime, shortName, booking.BoatName, booking.SkipperRequired);
+                    // Upis u list "Evidencija" za svaki dan
+                    bool isFirstDay = date == booking.StartDate.Value;
+                    await GoogleSheetsService.UpdateEvidenceSheet(booking, null, null, shortName, date, _selectedExtras, isFirstDay);
+                }
+            }
+            else
+            {
+                // Upis za jedan dan
+                await GoogleSheetsService.UpdateGoogleSheet(booking.StartDate.Value, null, null, booking.PassengerCount, booking.PickupTime, shortName, booking.BoatName, booking.SkipperRequired);
+                await GoogleSheetsService.UpdateEvidenceSheet(booking, null, null, shortName, booking.StartDate.Value, _selectedExtras, true);
+            }
+
             // Resetiranje forme nakon uspješnog slanja
             booking = new BoatBooking
                 {
@@ -182,9 +205,9 @@
                     BookingExtras = new List<BookingExtra>()
                 };
             _selectedExtras = new List<Extra>();
-            form?.ResetValidation(); // Resetiraj validaciju forme
+            form?.ResetValidation();
             isLoading = false;
-            StateHasChanged(); // Ažuriraj UI za sakrivanje spinners i reset forme
+            StateHasChanged();
 
             // Ponovno postavi defaultnu lokaciju "Hvar Port"
             var hvarPort = locations.FirstOrDefault(l => l.Name == "Hvar Port");
@@ -199,7 +222,7 @@
         catch (Exception ex)
         {
             isLoading = false;
-            StateHasChanged(); // Sakriti spinner u slučaju greške
+            StateHasChanged();
             Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
         }
     }
