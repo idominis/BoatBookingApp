@@ -10,6 +10,7 @@
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Boat Booking</MudText>
+
     <MudForm @ref="form" @bind-IsValid="@isFormValid">
         <MudSelect T="string" Label="Speedboat Name" @bind-Value="booking.BoatName" Required="true" Class="wide-select">
             @foreach (var boat in boats)
@@ -65,9 +66,22 @@
             }
         </MudSelect>
 
-        <MudGrid> <MudItem xs="4"> <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" /> </MudItem> <MudItem xs="4"> <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" /> </MudItem> </MudGrid>
+        <MudGrid>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
+            </MudItem>
+            <MudItem xs="4">
+                <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
+            </MudItem>
+        </MudGrid>
+
         <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
         <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
+
+        <MudCheckBox T="bool" @bind-Checked="generateDocument" ValueChanged="OnGenerateDocumentChanged" Label="Generate Confirmation Document" />
 
         <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="@(isLoading ? "display: block; margin: 20px auto;" : "display: none;")" />
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
@@ -83,6 +97,8 @@
     public BookerStateService BookerState { get; set; }
     [Inject]
     public GoogleSheetsService GoogleSheetsService { get; set; }
+    [Inject]
+    public DocumentGenerationService DocumentGenerationService { get; set; }
 
     private MudForm? form;
     private bool isFormValid;
@@ -99,6 +115,7 @@
     private IEnumerable<Extra> _selectedExtras = new List<Extra>();
     private int? selectedDepartureLocationId;
     private bool isLoading = false;
+    private bool generateDocument = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -144,6 +161,12 @@
         Console.WriteLine($"FuelIncluded changed to: {value}");
     }
 
+    private void OnGenerateDocumentChanged(bool value)
+    {
+        generateDocument = value;
+        Console.WriteLine($"GenerateDocument changed to: {value}");
+    }
+
     private async Task Submit()
     {
         try
@@ -153,8 +176,8 @@
 
             using var dbContext = DbContextFactory.CreateDbContext();
             var selectedBooker = await dbContext.Bookers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
+                .AsNoTracking()
+                .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
             if (selectedBooker != null)
             {
                 booking.BookerId = selectedBooker.Id;
@@ -163,7 +186,7 @@
             booking.DepartureLocationId = selectedDepartureLocationId;
             if (selectedDepartureLocationId == null)
             {
-                booking.CustomDepartureLocation = booking.CustomDepartureLocation ?? string.Empty;
+                booking.CustomDepartureLocation = booking.CustomDepartureLocation?.Trim() ?? string.Empty;
                 booking.CustomDepartureLocationName = booking.CustomDepartureLocationName ?? string.Empty;
             }
             else
@@ -179,21 +202,55 @@
             string shortName = BookerState.SelectedBookerShortName ?? "N/A";
             if (booking.IsMultiDay && booking.EndDate.HasValue)
             {
-                // Upis za svaki dan od StartDate do EndDate
                 for (var date = booking.StartDate.Value; date <= booking.EndDate.Value; date = date.AddDays(1))
                 {
-                    // Upis u list "2025" za svaki dan
                     await GoogleSheetsService.UpdateGoogleSheet(date, null, null, booking.PassengerCount, booking.PickupTime, shortName, booking.BoatName, booking.SkipperRequired);
-                    // Upis u list "Evidencija" za svaki dan
                     bool isFirstDay = date == booking.StartDate.Value;
                     await GoogleSheetsService.UpdateEvidenceSheet(booking, null, null, shortName, date, _selectedExtras, isFirstDay);
                 }
             }
             else
             {
-                // Upis za jedan dan
                 await GoogleSheetsService.UpdateGoogleSheet(booking.StartDate.Value, null, null, booking.PassengerCount, booking.PickupTime, shortName, booking.BoatName, booking.SkipperRequired);
                 await GoogleSheetsService.UpdateEvidenceSheet(booking, null, null, shortName, booking.StartDate.Value, _selectedExtras, true);
+            }
+
+            // Generiranje dokumenta ako je označeno
+            string generatedPaths = "";
+            if (generateDocument)
+            {
+                string templatePath = booking.DepartureLocationId == 1
+                    ? Path.Combine("wwwroot", "templates", "BookingConfirmation_BoatHvar_Template.docx")
+                    : Path.Combine("wwwroot", "templates", "BookingConfirmation_Boat_Template.docx");
+                string baseFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
+                string startDateStr = booking.StartDate?.ToString("dd-MM-yyyy") ?? "N/A";
+                string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
+                string subFolderName = $"{booking.Id}_Boat_{booking.BoatName}_{startDateStr}_{renterName}";
+
+                string basePath;
+                try
+                {
+                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
+                    string subFolderPath = Path.Combine(basePath, subFolderName);
+                    Directory.CreateDirectory(subFolderPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
+                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
+                    string subFolderPath = Path.Combine(basePath, subFolderName);
+                    Directory.CreateDirectory(subFolderPath);
+                }
+
+                string fileName = $"{baseFileName}.docx";
+                string outputPath = Path.Combine(basePath, subFolderName, fileName);
+
+                string pickUpMapLink = booking.DepartureLocationId.HasValue
+                    ? locations.FirstOrDefault(l => l.Id == booking.DepartureLocationId)?.Link?.Trim() ?? ""
+                    : booking.CustomDepartureLocation?.Trim() ?? "";
+                DocumentGenerationService.GenerateBoatBookingDocument(booking, pickUpMapLink, _selectedExtras, templatePath, outputPath);
+
+                generatedPaths = $"Document generated at: {outputPath}";
             }
 
             // Resetiranje forme nakon uspješnog slanja
@@ -205,6 +262,7 @@
                     BookingExtras = new List<BookingExtra>()
                 };
             _selectedExtras = new List<Extra>();
+            generateDocument = false;
             form?.ResetValidation();
             isLoading = false;
             StateHasChanged();
@@ -217,7 +275,7 @@
                 booking.DepartureLocationId = hvarPort.Id;
             }
 
-            Snackbar.Add("Sent Successfully!", Severity.Success);
+            Snackbar.Add("Boat booking saved and sheets updated." + (generateDocument ? $"\n{generatedPaths}" : ""), Severity.Success);
         }
         catch (Exception ex)
         {
@@ -227,3 +285,13 @@
         }
     }
 }
+
+<style>
+    .wide-select {
+        width: 300px;
+    }
+
+        .wide-select .mud-input-control {
+            width: 300px;
+        }
+</style>

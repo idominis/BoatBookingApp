@@ -72,4 +72,10 @@
     <ProjectReference Include="..\BoatBookingApp.Frontend.Shared\BoatBookingApp.Frontend.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Update="wwwroot\templates\BookingConfirmation_Boat_Template.docx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
