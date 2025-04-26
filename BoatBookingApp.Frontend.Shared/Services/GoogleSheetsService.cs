@@ -135,7 +135,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 else
                 {
                     // Za transfere: Provjera slobodnog polja u stupcima U, V, W
-                    string checkRange = $"2025!U{rowIndex}:W{rowIndex}";
+                    string checkRange = $"2025!T{rowIndex}:V{rowIndex}";
                     var checkRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, checkRange);
                     var checkResponse = await checkRequest.ExecuteAsync();
 
