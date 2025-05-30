@@ -7,6 +7,7 @@
 @using System.Threading.Tasks
 @using BoatBookingApp.Frontend.Shared.Data
 @using BoatBookingApp.Frontend.Shared.Services
+@using System.Text.RegularExpressions
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Boat Booking</MudText>
@@ -68,7 +69,7 @@
 
         <MudGrid>
             <MudItem xs="4">
-                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
+                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" Validation="@(new Func<string, string>(ValidateRenterName))" />
             </MudItem>
             <MudItem xs="4">
                 <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
@@ -133,6 +134,15 @@
         }
     }
 
+    private string ValidateRenterName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "Renter Name is required.";
+        if (Regex.IsMatch(name, @"^(https?://|www\.)"))
+            return "Renter Name cannot be a URL.";
+        return null;
+    }
+
     private void OnSelectedExtrasChanged(IEnumerable<Extra> newValue)
     {
         _selectedExtras = newValue;
@@ -144,7 +154,7 @@
         booking.IsMultiDay = value;
         if (!value)
         {
-            booking.EndDate = null;
+            booking.EndDate = booking.StartDate; // Postavi EndDate na StartDate za single-day
         }
         StateHasChanged();
     }
@@ -172,7 +182,9 @@
         try
         {
             isLoading = true;
-            StateHasChanged(); // Prikazati spinner
+            StateHasChanged();
+
+            Console.WriteLine($"Početak Submit metode, generateDocument: {generateDocument}");
 
             using var dbContext = DbContextFactory.CreateDbContext();
             var selectedBooker = await dbContext.Bookers
@@ -219,38 +231,50 @@
             string generatedPaths = "";
             if (generateDocument)
             {
+                Console.WriteLine($"Pokušaj generiranja dokumenta, booking ID: {booking.Id}");
                 string templatePath = booking.DepartureLocationId == 1
                     ? Path.Combine("wwwroot", "templates", "BookingConfirmation_BoatHvar_Template.docx")
                     : Path.Combine("wwwroot", "templates", "BookingConfirmation_Boat_Template.docx");
+                Console.WriteLine($"Koristi predložak: {templatePath}");
+
                 string baseFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
                 string startDateStr = booking.StartDate?.ToString("dd-MM-yyyy") ?? "N/A";
                 string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
-                string subFolderName = $"{booking.Id}_Boat_{booking.BoatName}_{startDateStr}_{renterName}";
+                // Sanitizacija imena podmape
+                string sanitizedBoatName = Regex.Replace(booking.BoatName ?? "Unknown", @"[^a-zA-Z0-9\s_-]", "");
+                string sanitizedRenter = Regex.Replace(renterName, @"[^a-zA-Z0-9_-]", "");
+                string subFolderName = $"{booking.Id}_Boat_{sanitizedBoatName}_{startDateStr}_{sanitizedRenter}";
 
                 string basePath;
                 try
                 {
-                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
+                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025", "0_Boats_2025");
                     string subFolderPath = Path.Combine(basePath, subFolderName);
+                    Console.WriteLine($"Pokušaj kreiranja mape: {subFolderPath}");
                     Directory.CreateDirectory(subFolderPath);
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
-                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
+                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025", "0_Boats_2025");
                     string subFolderPath = Path.Combine(basePath, subFolderName);
+                    Console.WriteLine($"Pokušaj kreiranja fallback mape: {subFolderPath}");
                     Directory.CreateDirectory(subFolderPath);
                 }
 
                 string fileName = $"{baseFileName}.docx";
                 string outputPath = Path.Combine(basePath, subFolderName, fileName);
+                Console.WriteLine($"Izlazna putanja dokumenta: {outputPath}");
 
                 string pickUpMapLink = booking.DepartureLocationId.HasValue
                     ? locations.FirstOrDefault(l => l.Id == booking.DepartureLocationId)?.Link?.Trim() ?? ""
                     : booking.CustomDepartureLocation?.Trim() ?? "";
+                Console.WriteLine($"pickUpMapLink: {pickUpMapLink}");
+
                 DocumentGenerationService.GenerateBoatBookingDocument(booking, pickUpMapLink, _selectedExtras, templatePath, outputPath);
 
                 generatedPaths = $"Document generated at: {outputPath}";
+                Console.WriteLine($"Dokument generiran, putanja: {generatedPaths}");
             }
 
             // Resetiranje forme nakon uspješnog slanja
@@ -281,6 +305,7 @@
         {
             isLoading = false;
             StateHasChanged();
+            Console.WriteLine($"Greška u Submit: {ex.Message}, StackTrace: {ex.StackTrace}");
             Snackbar.Add($"Sent Error: {ex.Message}", Severity.Error);
         }
     }

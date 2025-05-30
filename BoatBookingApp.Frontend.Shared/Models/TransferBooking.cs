@@ -10,11 +10,11 @@ namespace BoatBookingApp.Frontend.Shared.Models
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int Id { get; set; }
         public int? DepartureLocationId { get; set; }
-        public string CustomDepartureLocation { get; set; } = string.Empty;
-        public string CustomDepartureLocationName { get; set; } = string.Empty;
+        public string? CustomDepartureLocation { get; set; } = string.Empty;
+        public string? CustomDepartureLocationName { get; set; } = string.Empty;
         public int? ArrivalLocationId { get; set; }
-        public string CustomArrivalLocation { get; set; } = string.Empty;
-        public string CustomArrivalLocationName { get; set; } = string.Empty;
+        public string? CustomArrivalLocation { get; set; } = string.Empty;
+        public string? CustomArrivalLocationName { get; set; } = string.Empty;
         public DateTime? DepartureDate { get; set; }
         public TimeSpan? DepartureTime { get; set; }
         public DateTime? ReTourDate { get; set; }

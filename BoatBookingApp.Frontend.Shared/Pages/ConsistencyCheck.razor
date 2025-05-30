@@ -1,0 +1,338 @@
+﻿@page "/consistency-check"
+@using BoatBookingApp.Frontend.Shared.Models
+@using BoatBookingApp.Frontend.Shared.Services
+@using MudBlazor
+@using System.Threading.Tasks
+@using Microsoft.EntityFrameworkCore
+@using System.Text.RegularExpressions
+
+<MudContainer MaxWidth="MaxWidth.Large">
+    <MudText Typo="Typo.h4" GutterBottom="true">Consistency Check</MudText>
+
+    <MudForm>
+        <MudDatePicker Label="Select Date" @bind-Date="selectedDate" Required="true" />
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="RunConsistencyCheck" Class="mt-4" Disabled="@(!selectedDate.HasValue)">Run Check</MudButton>
+    </MudForm>
+
+    @if (isLoading)
+    {
+        <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="display: block; margin: 20px auto;" />
+    }
+    else if (report != null && report.Any())
+    {
+        <MudPaper Elevation="2" Class="pa-4 mt-4">
+            <MudText Typo="Typo.h6">Datum: @selectedDate.Value.ToString("dd.MM.yyyy")</MudText>
+            @foreach (var entry in report.Where(r => r.Type == "Boat"))
+            {
+                <MudText Typo="Typo.body1" Class="mt-2">
+                    Type: Boat<br />
+                    Booking ID: @entry.BookingId<br />
+                    Details: @entry.Details<br />
+                    Sheet 2025: <span style="@GetStatusStyle(entry.Sheet2025Status)">@entry.Sheet2025Status</span><br />
+                    Evidencija: <span style="@GetStatusStyle(entry.EvidencijaStatus)">@entry.EvidencijaStatus</span><br />
+                    Document: <span style="@GetStatusStyle(entry.DocumentStatus)">@entry.DocumentStatus</span><br />
+                    Database: <span style="@GetStatusStyle(entry.DatabaseStatus)">@entry.DatabaseStatus</span><br />
+                    Note: @entry.Note
+                </MudText>
+                <MudDivider Class="my-2" />
+            }
+            @foreach (var entry in report.Where(r => r.Type == "Transfer"))
+            {
+                <MudText Typo="Typo.body1" Class="mt-2">
+                    Type: Transfer<br />
+                    Booking ID: @entry.BookingId<br />
+                    Details: @entry.Details<br />
+                    Sheet 2025: <span style="@GetStatusStyle(entry.Sheet2025Status)">@entry.Sheet2025Status</span><br />
+                    Evidencija: <span style="@GetStatusStyle(entry.EvidencijaStatus)">@entry.EvidencijaStatus</span><br />
+                    Document: <span style="@GetStatusStyle(entry.DocumentStatus)">@entry.DocumentStatus</span><br />
+                    Database: <span style="@GetStatusStyle(entry.DatabaseStatus)">@entry.DatabaseStatus</span><br />
+                    Note: @entry.Note
+                </MudText>
+                <MudDivider Class="my-2" />
+            }
+        </MudPaper>
+    }
+    else if (report != null)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">No bookings found for the selected date.</MudAlert>
+    }
+</MudContainer>
+
+@code {
+    [Inject]
+    public GoogleSheetsService GoogleSheetsService { get; set; }
+    [Inject]
+    public DocumentGenerationService DocumentGenerationService { get; set; }
+    [Inject]
+    public IDbContextFactory<BoatBookingContext> DbContextFactory { get; set; }
+    [Inject]
+    public ISnackbar Snackbar { get; set; }
+
+    private DateTime? selectedDate;
+    private List<ConsistencyReport> report;
+    private bool isLoading = false;
+
+    private string NormalizeDetails(string details, string type)
+    {
+        if (string.IsNullOrEmpty(details))
+            return "";
+        // Ukloni datum iz Details (npr. "-30-05-2025")
+        var dateMatch = Regex.Match(details, @"-\d{2}-\d{2}-\d{4}$");
+        if (dateMatch.Success)
+            details = details.Substring(0, details.Length - dateMatch.Length);
+        string normalized = details;
+        if (type == "Transfer")
+        {
+            // Za transfere, ukloni T1/T2/T3 prefiks i normaliziraj lokacije
+            var transferMatch = Regex.Match(details, @"^T\d: (.*?)(?:,|$)");
+            normalized = transferMatch.Success ? transferMatch.Groups[1].Value.Trim() : details;
+            // Zamijeni višestruke razmake s jednim
+            normalized = Regex.Replace(normalized.Trim(), @"\s+", " ");
+        }
+        else
+        {
+            // Za glisere, zadrži originalni format
+            normalized = Regex.Replace(normalized.Trim(), @"\s+", " ");
+        }
+        return normalized;
+    }
+
+    private string GetCanonicalTransferDetails(string details)
+    {
+        // Za transfere, sortiraj lokacije abecedno da eliminiramo dupliciranje tour/retour
+        var parts = details.Split('-');
+        if (parts.Length >= 2)
+        {
+            var sorted = parts.OrderBy(p => p).ToArray();
+            return $"{sorted[0]}-{sorted[1]}";
+        }
+        return details;
+    }
+
+    private async Task RunConsistencyCheck()
+    {
+        if (!selectedDate.HasValue)
+        {
+            Snackbar.Add("Please select a date.", Severity.Warning);
+            return;
+        }
+
+        isLoading = true;
+        report = null;
+        StateHasChanged();
+
+        try
+        {
+            Console.WriteLine($"Pokretanje provjere konzistentnosti za datum: {selectedDate.Value:dd.MM.yyyy}");
+
+            var sheet2025Bookings = await GoogleSheetsService.GetBookingsFromSheet2025(selectedDate.Value);
+            var evidencijaBookings = await GoogleSheetsService.GetBookingsFromEvidencija(selectedDate.Value);
+            var documents = await DocumentGenerationService.GetDocumentsForDate(selectedDate.Value);
+            var databaseBookings = await GetDatabaseBookings(selectedDate.Value);
+
+            report = new List<ConsistencyReport>();
+            var allBookings = databaseBookings
+                .Select(b => new
+                {
+                    b.BookingId,
+                    b.Type,
+                    Details = NormalizeDetails(b.Details, b.Type),
+                    CanonicalDetails = b.Type == "Transfer" ? GetCanonicalTransferDetails(NormalizeDetails(b.Details, b.Type)) : NormalizeDetails(b.Details, b.Type),
+                    b.Locations,
+                    b.BoatName
+                })
+                .Union(sheet2025Bookings.Select(b => new
+                {
+                    b.BookingId,
+                    b.Type,
+                    Details = NormalizeDetails(b.Details, b.Type),
+                    CanonicalDetails = b.Type == "Transfer" ? GetCanonicalTransferDetails(NormalizeDetails(b.Details, b.Type)) : NormalizeDetails(b.Details, b.Type),
+                    b.Locations,
+                    b.BoatName
+                }))
+                .Union(evidencijaBookings.Select(b => new
+                {
+                    b.BookingId,
+                    b.Type,
+                    Details = NormalizeDetails(b.Details, b.Type),
+                    CanonicalDetails = b.Type == "Transfer" ? GetCanonicalTransferDetails(NormalizeDetails(b.Details, b.Type)) : NormalizeDetails(b.Details, b.Type),
+                    b.Locations,
+                    b.BoatName
+                }))
+                .Union(documents.Select(b => new
+                {
+                    b.BookingId,
+                    b.Type,
+                    Details = NormalizeDetails(b.Details, b.Type),
+                    CanonicalDetails = b.Type == "Transfer" ? GetCanonicalTransferDetails(NormalizeDetails(b.Details, b.Type)) : NormalizeDetails(b.Details, b.Type),
+                    b.Locations,
+                    b.BoatName
+                }))
+                .GroupBy(b => new { b.BookingId, b.Type, b.CanonicalDetails })
+                .Select(g =>
+                {
+                    var first = g.First();
+                    // Odaberi Details iz baze ako postoji, inače uzmi prvi
+                    var dbBooking = databaseBookings.FirstOrDefault(db => db.BookingId == first.BookingId && db.Type == first.Type && NormalizeDetails(db.Details, db.Type) == first.Details);
+                    return new
+                    {
+                        first.BookingId,
+                        first.Type,
+                        Details = dbBooking != null ? NormalizeDetails(dbBooking.Details, dbBooking.Type) : first.Details,
+                        first.Locations,
+                        first.BoatName
+                    };
+                })
+                .Where(b => !string.IsNullOrEmpty(b.Details))
+                .ToList();
+
+            foreach (var booking in allBookings)
+            {
+                var sheet2025 = sheet2025Bookings.FirstOrDefault(b => b.BookingId == booking.BookingId && b.Type == booking.Type && NormalizeDetails(b.Details, b.Type) == booking.Details);
+                var evidencija = evidencijaBookings.FirstOrDefault(b => b.BookingId == booking.BookingId && b.Type == booking.Type && NormalizeDetails(b.Details, b.Type) == booking.Details);
+                var document = documents.FirstOrDefault(d => d.BookingId == booking.BookingId && d.Type == booking.Type && NormalizeDetails(d.Details, d.Type) == booking.Details);
+                var database = databaseBookings.FirstOrDefault(b => b.BookingId == booking.BookingId && b.Type == booking.Type && NormalizeDetails(b.Details, b.Type) == booking.Details);
+
+                var reportEntry = new ConsistencyReport
+                    {
+                        BookingId = booking.BookingId,
+                        Date = selectedDate.Value,
+                        Type = booking.Type,
+                        Details = booking.Details,
+                        BoatName = booking.Type == "Boat" ? booking.BoatName : null,
+                        Locations = booking.Type == "Transfer" ? booking.Details : null,
+                        Sheet2025Status = sheet2025 != null ? "Yes" : "No",
+                        EvidencijaStatus = evidencija != null ? "Yes" : "No",
+                        DocumentStatus = document != null ? "Yes" : "No",
+                        DatabaseStatus = database != null ? "Yes" : "No",
+                        Note = ""
+                    };
+
+                if (sheet2025 == null)
+                    reportEntry.Note += $"Missing in Sheet 2025 (Expected {reportEntry.Details}); ";
+                if (evidencija == null)
+                    reportEntry.Note += $"Missing in Evidencija (Expected {reportEntry.Details}); ";
+                if (document == null)
+                    reportEntry.Note += $"Missing document (Expected {reportEntry.Details}); ";
+                if (database == null)
+                    reportEntry.Note += $"Missing in database (Expected {reportEntry.Details}); ";
+
+                report.Add(reportEntry);
+                Console.WriteLine($"Dodan izvještaj: BookingId={booking.BookingId}, Type={booking.Type}, Details={booking.Details}, Sheet={reportEntry.Sheet2025Status}, Evidencija={reportEntry.EvidencijaStatus}, Document={reportEntry.DocumentStatus}, Database={reportEntry.DatabaseStatus}");
+            }
+
+            Console.WriteLine($"Provjera završena: Pronađeno {report.Count} zapisa.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Greška u provjeri konzistentnosti: {ex.Message}, StackTrace: {ex.StackTrace}");
+            Snackbar.Add($"Error during consistency check: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<List<ConsistencyReport>> GetDatabaseBookings(DateTime date)
+    {
+        using var dbContext = DbContextFactory.CreateDbContext();
+
+        var locations = await dbContext.Locations.AsNoTracking().ToListAsync();
+
+        var boatBookings = await dbContext.BoatBookings
+            .Where(b => b.StartDate.HasValue &&
+                        b.StartDate.Value.Year == date.Year &&
+                        b.StartDate.Value.Month == date.Month &&
+                        b.StartDate.Value.Day == date.Day)
+            .Select(b => new ConsistencyReport
+                {
+                    BookingId = b.Id,
+                    Type = "Boat",
+                    BoatName = b.BoatName ?? "Unknown",
+                    Details = b.BoatName ?? "Unknown"
+                })
+            .ToListAsync();
+
+        foreach (var booking in boatBookings)
+        {
+            Console.WriteLine($"Boat booking pronađen: Id={booking.BookingId}, BoatName={booking.BoatName}, Details={booking.Details}, Date={date:dd.MM.yyyy}");
+        }
+
+        var transferBookingsRaw = await dbContext.TransferBookings
+            .Where(t =>
+                (t.DepartureDate.HasValue &&
+                 t.DepartureDate.Value.Year == date.Year &&
+                 t.DepartureDate.Value.Month == date.Month &&
+                 t.DepartureDate.Value.Day == date.Day)
+                ||
+                (t.WithReTour && t.ReTourDate.HasValue &&
+                 t.ReTourDate.Value.Year == date.Year &&
+                 t.ReTourDate.Value.Month == date.Month &&
+                 t.ReTourDate.Value.Day == date.Day))
+            .Select(t => new
+            {
+                t.Id,
+                t.DepartureLocationId,
+                t.CustomDepartureLocationName,
+                t.ArrivalLocationId,
+                t.CustomArrivalLocationName,
+                t.DepartureDate,
+                t.ReTourDate,
+                t.WithReTour,
+                RenterName = t.RenterName ?? "Unknown",
+                RenterEmail = t.RenterEmail ?? "unknown@example.com",
+                RenterPhone = t.RenterPhone ?? "N/A"
+            })
+            .ToListAsync();
+
+        var transferBookings = transferBookingsRaw
+            .Select(t =>
+            {
+                Console.WriteLine($"Obrada transfer booking Id={t.Id}, DepartureDate={t.DepartureDate}, ReTourDate={t.ReTourDate}, DepartureLocationId={t.DepartureLocationId}, ArrivalLocationId={t.ArrivalLocationId}, RenterName={t.RenterName}, RenterEmail={t.RenterEmail}, RenterPhone={t.RenterPhone}");
+
+                string departureName = t.DepartureLocationId.HasValue
+                    ? locations.FirstOrDefault(l => l.Id == t.DepartureLocationId)?.Name ?? $"Unknown_Location_{t.DepartureLocationId}"
+                    : t.CustomDepartureLocationName ?? "Unknown_Custom";
+                string arrivalName = t.ArrivalLocationId.HasValue
+                    ? locations.FirstOrDefault(l => l.Id == t.ArrivalLocationId)?.Name ?? $"Unknown_Location_{t.ArrivalLocationId}"
+                    : t.CustomArrivalLocationName ?? "Unknown_Custom";
+
+                if (string.IsNullOrEmpty(departureName) || string.IsNullOrEmpty(arrivalName))
+                {
+                    Console.WriteLine($"Preskočen transfer booking Id={t.Id} zbog praznih lokacija: DepartureLocationId={t.DepartureLocationId}, ArrivalLocationId={t.ArrivalLocationId}, CustomDeparture={t.CustomDepartureLocationName}, CustomArrival={t.CustomArrivalLocationName}");
+                    return null;
+                }
+
+                // Za retour, koristi obrnuti redoslijed
+                string details = t.ReTourDate.HasValue && t.ReTourDate.Value.Date == date.Date
+                    ? $"{arrivalName}-{departureName}"
+                    : $"{departureName}-{arrivalName}";
+
+                return new ConsistencyReport
+                    {
+                        BookingId = t.Id,
+                        Type = "Transfer",
+                        Locations = details,
+                        Details = details
+                    };
+            })
+            .Where(t => t != null)
+            .ToList();
+
+        foreach (var booking in transferBookings)
+        {
+            Console.WriteLine($"Transfer booking pronađen: Id={booking.BookingId}, Locations={booking.Locations}, Details={booking.Details}, Date={date:dd.MM.yyyy}");
+        }
+
+        var allBookings = boatBookings.Concat(transferBookings).ToList();
+        Console.WriteLine($"Ukupno pronađeno {allBookings.Count} bukiranja u bazi za {date:dd.MM.yyyy}");
+        return allBookings;
+    }
+
+    private string GetStatusStyle(string status)
+    {
+        return status == "Yes" ? "color: green;" : "color: red;";
+    }
+}

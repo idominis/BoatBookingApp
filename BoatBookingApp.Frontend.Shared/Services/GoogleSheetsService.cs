@@ -8,8 +8,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using BoatBookingApp.Frontend.Shared.Models;
+using BoatBookingApp.Frontend.Shared.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace BoatBookingApp.Frontend.Shared.Services
 {
@@ -17,9 +20,13 @@ namespace BoatBookingApp.Frontend.Shared.Services
     {
         private readonly SheetsService sheetsService;
         private readonly string spreadsheetId;
+        private readonly IDbContextFactory<BoatBookingContext> dbContextFactory;
+        private const int EVIDENCIJA_SHEET_ID = 1240119258;
+        private const int SHEET_2025_ID = 300482270;
 
-        public GoogleSheetsService(IConfiguration configuration)
+        public GoogleSheetsService(IConfiguration configuration, IDbContextFactory<BoatBookingContext> dbContextFactory)
         {
+            this.dbContextFactory = dbContextFactory;
             var credentialsPath = configuration["GoogleSheets:CredentialsPath"];
             spreadsheetId = configuration["GoogleSheets:SpreadsheetId"];
 
@@ -50,15 +57,34 @@ namespace BoatBookingApp.Frontend.Shared.Services
             });
         }
 
+        private string NormalizeLocationName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return "";
+            // Zamijeni višestruke razmake s jednim, zadrži razmake
+            name = Regex.Replace(name.Trim(), @"\s+", " ");
+            return name;
+        }
+
+        private string NormalizeTransferDetails(string details)
+        {
+            if (string.IsNullOrEmpty(details))
+                return "";
+            // Ukloni prefiks T1/T2/T3 i dodatne informacije
+            var match = Regex.Match(details, @"^T\d: (.*?)(?:,|$)");
+            string normalized = match.Success ? match.Groups[1].Value.Trim() : details;
+            // Normaliziraj svaku lokaciju
+            var parts = normalized.Split('-').Select(NormalizeLocationName).ToArray();
+            return parts.Length >= 2 ? $"{parts[0]}-{parts[1]}" : normalized;
+        }
+
         public async Task UpdateGoogleSheet(DateTime date, string pickUpLocation, string dropOffLocation, int passengerCount, TimeSpan? time, string shortName, string boatName = null, bool skipperRequired = false)
         {
             try
             {
-                // Formatiranje datuma za Google Sheet (usklađeno s formatom 15.4.)
                 string dateStr = date.ToString("d.M.", CultureInfo.InvariantCulture);
                 Console.WriteLine($"Pokušaj upisa za datum: {dateStr}");
 
-                // Pronalaženje reda za datum, preskačemo prvi redak (naslov)
                 string range = "2025!A2:A";
                 var getRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range);
                 var getResponse = await getRequest.ExecuteAsync();
@@ -80,7 +106,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                             {
                                 if (parsedSheetDate.Date == date.Date)
                                 {
-                                    rowIndex = i + 2; // +2 jer počinjemo od A2 (red 2 u Sheetu)
+                                    rowIndex = i + 2;
                                     Console.WriteLine($"Podudaranje pronađeno, red: {rowIndex}");
                                     break;
                                 }
@@ -93,7 +119,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     }
                 }
 
-                // Ako datum nije pronađen, dodaj novi red
                 if (rowIndex == -1)
                 {
                     rowIndex = getResponse.Values != null ? getResponse.Values.Count + 2 : 2;
@@ -108,8 +133,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 int columnIndex;
                 if (boatName != null)
                 {
-                    // Za glisere: Pronađi stupac koji odgovara imenu glisera u C-T
-                    string headerRange = "2025!C1:T1"; // Nazivi glisera u redu 1
+                    string headerRange = "2025!C1:S1";
                     var headerRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, headerRange);
                     var headerResponse = await headerRequest.ExecuteAsync();
                     columnIndex = -1;
@@ -120,7 +144,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                         {
                             if (headerResponse.Values[0][i].ToString().Equals(boatName, StringComparison.OrdinalIgnoreCase))
                             {
-                                columnIndex = i + 2; // +2 jer počinjemo od stupca C (indeks 2)
+                                columnIndex = i + 3;
                                 Console.WriteLine($"Pronađen stupac za gliser: {boatName}, columnIndex: {columnIndex}");
                                 break;
                             }
@@ -129,12 +153,11 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                     if (columnIndex == -1)
                     {
-                        throw new InvalidOperationException($"Gliser {boatName} nije pronađen u stupcima C-T!");
+                        throw new InvalidOperationException($"Gliser {boatName} nije pronađen u stupcima C-S!");
                     }
                 }
                 else
                 {
-                    // Za transfere: Provjera slobodnog polja u stupcima U, V, W
                     string checkRange = $"2025!T{rowIndex}:V{rowIndex}";
                     var checkRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, checkRange);
                     var checkResponse = await checkRequest.ExecuteAsync();
@@ -150,8 +173,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     }
                 }
 
-                // Upis ShortName u slobodno polje
-                char columnLetter = (char)('A' + columnIndex);
+                string columnLetter = GetColumnLetter(columnIndex);
                 string shortNameRange = $"2025!{columnLetter}{rowIndex}";
                 var shortNameValue = new ValueRange { Values = new List<IList<object>> { new List<object> { shortName } } };
                 var shortNameRequest = sheetsService.Spreadsheets.Values.Update(shortNameValue, spreadsheetId, shortNameRange);
@@ -159,7 +181,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 await shortNameRequest.ExecuteAsync();
                 Console.WriteLine($"ShortName '{shortName}' upisan u {shortNameRange}");
 
-                // Bojanje ćelije
                 var formatRequest = new BatchUpdateSpreadsheetRequest
                 {
                     Requests = new List<Request>
@@ -170,21 +191,21 @@ namespace BoatBookingApp.Frontend.Shared.Services
                             {
                                 Range = new GridRange
                                 {
-                                    SheetId = 300482270, // SheetId za "2025"
+                                    SheetId = SHEET_2025_ID,
                                     StartRowIndex = rowIndex - 1,
                                     EndRowIndex = rowIndex,
-                                    StartColumnIndex = columnIndex,
-                                    EndColumnIndex = columnIndex + 1
+                                    StartColumnIndex = columnIndex - 1,
+                                    EndColumnIndex = columnIndex
                                 },
                                 Cell = new CellData
                                 {
                                     UserEnteredFormat = new CellFormat
                                     {
                                         BackgroundColor = boatName != null && skipperRequired
-                                            ? new Color { Red = 0, Green = 0, Blue = 1 } // Modra za gliser sa skiperom
+                                            ? new Color { Red = 0, Green = 0, Blue = 1 }
                                             : boatName != null
-                                                ? new Color { Red = 1, Green = 0, Blue = 0 } // Crvena za gliser bez skipera
-                                                : new Color { Red = 0, Green = 0, Blue = 1 }, // Modra za transfere
+                                                ? new Color { Red = 1, Green = 0, Blue = 0 }
+                                                : new Color { Red = 0, Green = 0, Blue = 1 },
                                         TextFormat = new TextFormat { ForegroundColor = new Color { Red = 1, Green = 1, Blue = 1 } }
                                     }
                                 },
@@ -196,26 +217,25 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 await sheetsService.Spreadsheets.BatchUpdate(formatRequest, spreadsheetId).ExecuteAsync();
                 Console.WriteLine($"Ćelija {shortNameRange} obojana {(boatName != null && skipperRequired ? "modro" : boatName != null ? "crveno" : "modro")} s bijelim tekstom");
 
-                // Upis napomene samo za transfere
                 if (boatName == null)
                 {
-                    string noteRange = $"2025!X{rowIndex}";
+                    string noteRange = $"2025!W{rowIndex}";
                     var noteGetRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, noteRange);
                     var noteGetResponse = await noteGetRequest.ExecuteAsync();
                     string existingNote = noteGetResponse.Values != null && noteGetResponse.Values.Count > 0 && noteGetResponse.Values[0].Count > 0
                         ? noteGetResponse.Values[0][0].ToString()
                         : "";
-                    Console.WriteLine($"Postojeća napomena: {existingNote}");
+                    Console.WriteLine($"Postojeća napomena u W: {existingNote}");
 
-                    string transferPrefix = columnIndex switch
+                    string transferPrefix = (columnIndex - 20) switch
                     {
-                        20 => "T1",
-                        21 => "T2",
-                        22 => "T3",
+                        0 => "T1",
+                        1 => "T2",
+                        2 => "T3",
                         _ => "T?"
                     };
                     string timeFormatted = time.HasValue ? $"{time.Value.Hours:D2}:{time.Value.Minutes:D2}" : "N/A";
-                    string newNote = $"{transferPrefix}: {pickUpLocation ?? "N/A"}-{dropOffLocation ?? "N/A"}, {passengerCount} osobe, polazak u {timeFormatted}";
+                    string newNote = $"{transferPrefix}: {NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}, {passengerCount} osobe, polazak u {timeFormatted}";
                     Console.WriteLine($"Nova napomena: {newNote}");
 
                     string combinedNote = string.IsNullOrEmpty(existingNote) ? newNote : $"{existingNote} / {newNote}";
@@ -233,52 +253,61 @@ namespace BoatBookingApp.Frontend.Shared.Services
             }
         }
 
+        private string GetColumnLetter(int columnIndex)
+        {
+            string columnLetter = "";
+            while (columnIndex > 0)
+            {
+                int modulo = (columnIndex - 1) % 26;
+                columnLetter = (char)('A' + modulo) + columnLetter;
+                columnIndex = (columnIndex - 1) / 26;
+            }
+            return columnLetter;
+        }
+
         public async Task UpdateEvidenceSheet(TransferBooking booking, string pickUpLocation, string dropOffLocation, string shortName, bool isReTour)
         {
             try
             {
-                // Pronalaženje prvog slobodnog reda u listu "Evidencija" (preskačemo naslov u redu 1)
                 string range = "Evidencija!A2:A";
                 var getRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range);
                 var getResponse = await getRequest.ExecuteAsync();
                 int rowIndex = getResponse.Values != null ? getResponse.Values.Count + 2 : 2;
                 Console.WriteLine($"Pronađen slobodan red u Evidencija: {rowIndex}");
 
-                // Priprema podataka za upis (24 stupaca: A-X)
                 string dateStr = isReTour ? booking.ReTourDate?.ToString("d.M.", CultureInfo.InvariantCulture) ?? "N/A" : booking.DepartureDate?.ToString("d.M.", CultureInfo.InvariantCulture) ?? "N/A";
-                string timeFormatted = isReTour ? (booking.ReTourTime.HasValue ? $"{booking.ReTourTime.Value.Hours:D2}:{booking.ReTourTime.Value.Minutes:D2}" : "N/A") : (booking.DepartureTime.HasValue ? $"{booking.DepartureTime.Value.Hours:D2}:{booking.DepartureTime.Value.Minutes:D2}" : "N/A");
-                string locationStr = isReTour ? $"{dropOffLocation}-{pickUpLocation}" : $"{pickUpLocation}-{dropOffLocation}";
+                string timeFormatted = isReTour ? (booking.ReTourTime.HasValue ? $"{booking.ReTourTime.Value.Hours:D2}:{booking.ReTourTime.Value.Minutes:D2}" : "N/A") : (booking.DepartureTime.HasValue ? $"{booking.DepartureTime.Value.Hours:D2}:{booking.ReTourTime.Value.Minutes:D2}" : "N/A");
+                string locationStr = isReTour ? $"{NormalizeLocationName(dropOffLocation)}-{NormalizeLocationName(pickUpLocation)}" : $"{NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}";
                 decimal brutto = isReTour ? 0 : booking.TotalPrice;
 
                 var values = new List<object>
                 {
-                    "Nedovršeno", // Status
-                    dateStr, // Datum
-                    booking.RenterName ?? "N/A", // Ime_Gosta
-                    locationStr, // Gliser_ili_Transfer
-                    booking.PassengerCount, // Broj_Putnika
-                    timeFormatted, // Vrijeme_Polaska
-                    "", // Napomena
-                    "Da", // Gorivo
-                    "Da", // Skiper
-                    "PayPal", // Kanal_Prodaje
-                    brutto, // Bruto(€)
-                    "", // Trošak_Goriva(€)
-                    70, // Trošak_Skipera(€)
-                    "", // Utrošak_Goriva(Lit)
-                    "g+s+PP", // Opis_Troškova
-                    "", // Neto(€)
-                    isReTour ? "" : booking.DepositPaid, // PayPal_Uplata(€)
-                    "", // Paypal_Fee(€)
-                    "", // IBAN(€)
-                    "", // Cash(€)
-                    isReTour ? "" : (booking.TotalPrice - booking.DepositPaid), // Preostalo_za_Naplatu(€)
-                    DateTime.Now.ToString("d.M.", CultureInfo.InvariantCulture), // Datum_Bukinga
-                    booking.RenterEmail ?? "N/A", // Email
-                    booking.RenterPhone ?? "N/A" // Mobitel
+                    "Nedovršeno",
+                    dateStr,
+                    booking.RenterName ?? "N/A",
+                    locationStr,
+                    booking.PassengerCount,
+                    timeFormatted,
+                    "",
+                    "Da",
+                    "Da",
+                    "PayPal",
+                    brutto,
+                    "",
+                    70,
+                    "",
+                    "g+s+PP",
+                    "",
+                    isReTour ? "" : booking.DepositPaid,
+                    "",
+                    "",
+                    "",
+                    isReTour ? "" : (booking.TotalPrice - booking.DepositPaid),
+                    DateTime.Now.ToString("d.M.", CultureInfo.InvariantCulture),
+                    booking.RenterEmail ?? "N/A",
+                    booking.RenterPhone ?? "N/A"
                 };
 
-                // Upis podataka u raspon A-X za slobodan red
                 string updateRange = $"Evidencija!A{rowIndex}:X{rowIndex}";
                 var valueRange = new ValueRange { Values = new List<IList<object>> { values } };
                 var updateRequest = sheetsService.Spreadsheets.Values.Update(valueRange, spreadsheetId, updateRange);
@@ -287,7 +316,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 Console.WriteLine($"Podaci upisani u Evidencija, red {rowIndex}: {string.Join(", ", values)}");
 
-                // Postavljanje dropdowna za stupac Status (A) od reda 2 nadalje
                 var dataValidationRequest = new BatchUpdateSpreadsheetRequest
                 {
                     Requests = new List<Request>
@@ -298,11 +326,11 @@ namespace BoatBookingApp.Frontend.Shared.Services
                             {
                                 Range = new GridRange
                                 {
-                                    SheetId = 1240119258, // gid za list "Evidencija"
-                                    StartRowIndex = 1, // Počinjemo od reda 2 (indeks 1 jer je 0-based)
-                                    EndRowIndex = null, // Cijeli stupac
-                                    StartColumnIndex = 0, // Stupac A
-                                    EndColumnIndex = 1 // Do stupca A (uključivo)
+                                    SheetId = EVIDENCIJA_SHEET_ID,
+                                    StartRowIndex = 1,
+                                    EndRowIndex = null,
+                                    StartColumnIndex = 0,
+                                    EndColumnIndex = 1
                                 },
                                 Rule = new DataValidationRule
                                 {
@@ -317,8 +345,8 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                             new ConditionValue { UserEnteredValue = "Otkazano" }
                                         }
                                     },
-                                    Strict = true, // Samo dopuštene vrijednosti
-                                    ShowCustomUi = true // Prikaz dropdowna u sučelju
+                                    Strict = true,
+                                    ShowCustomUi = true
                                 }
                             }
                         }
@@ -328,12 +356,10 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 await sheetsService.Spreadsheets.BatchUpdate(dataValidationRequest, spreadsheetId).ExecuteAsync();
                 Console.WriteLine("Dropdown postavljen za stupac Status u Evidencija.");
 
-                // Postavljanje uvjetnog formatiranja za stupac Status (A) od reda 2 nadalje
                 var conditionalFormatRequest = new BatchUpdateSpreadsheetRequest
                 {
                     Requests = new List<Request>
                     {
-                        // Pravilo za OK (zeleno)
                         new Request
                         {
                             AddConditionalFormatRule = new AddConditionalFormatRuleRequest
@@ -344,7 +370,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -359,14 +385,13 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f } // Zeleno
+                                            BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f }
                                         }
                                     }
                                 },
                                 Index = 0
                             }
                         },
-                        // Pravilo za Otkazano (crveno)
                         new Request
                         {
                             AddConditionalFormatRule = new AddConditionalFormatRuleRequest
@@ -377,7 +402,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -392,14 +417,13 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f } // Crveno
+                                            BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f }
                                         }
                                     }
                                 },
                                 Index = 0
                             }
                         },
-                        // Pravilo za Nedovršeno (rozo)
                         new Request
                         {
                             AddConditionalFormatRule = new AddConditionalFormatRuleRequest
@@ -410,7 +434,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -425,14 +449,13 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f } // Rozo (RGB: 255, 192, 203)
+                                            BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f }
                                         }
                                     }
                                 },
                                 Index = 0
                             }
                         },
-                        // Pravilo za Conf. poslan (smeđe)
                         new Request
                         {
                             AddConditionalFormatRule = new AddConditionalFormatRuleRequest
@@ -443,7 +466,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -458,7 +481,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f } // Smeđe (RGB: 139, 69, 19)
+                                            BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f }
                                         }
                                     }
                                 },
@@ -482,14 +505,12 @@ namespace BoatBookingApp.Frontend.Shared.Services
         {
             try
             {
-                // Pronalaženje prvog slobodnog reda u listu "Evidencija"
                 string range = "Evidencija!A2:A";
                 var getRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range);
                 var getResponse = await getRequest.ExecuteAsync();
                 int rowIndex = getResponse.Values != null ? getResponse.Values.Count + 2 : 2;
                 Console.WriteLine($"Pronađen slobodan red u Evidencija: {rowIndex}");
 
-                // Priprema podataka za upis (24 stupaca: A-X)
                 string dateStr = date.ToString("d.M.", CultureInfo.InvariantCulture);
                 string timeFormatted = booking.PickupTime.HasValue ? $"{booking.PickupTime.Value.Hours:D2}:{booking.PickupTime.Value.Minutes:D2}" : "N/A";
                 string extrasNote = selectedExtras.Any() ? string.Join(", ", selectedExtras.Select(e => e.Name)) : "";
@@ -500,33 +521,32 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 var values = new List<object>
                 {
-                    "Nedovršeno", // Status
-                    dateStr, // Datum
-                    booking.RenterName ?? "N/A", // Ime_Gosta
-                    booking.BoatName ?? "N/A", // Gliser_ili_Transfer
-                    booking.PassengerCount, // Broj_Putnika
-                    timeFormatted, // Vrijeme_Polaska
-                    extrasNote, // Napomena
-                    booking.FuelIncluded ? "Da" : "Ne", // Gorivo
-                    booking.SkipperRequired ? "Da" : "Ne", // Skiper
-                    "", // Kanal_Prodaje
-                    isFirstDay ? booking.TotalPrice : 0, // Bruto(€)
-                    "", // Trošak_Goriva(€)
-                    booking.SkipperRequired ? 70 : "", // Trošak_Skipera(€)
-                    "", // Utrošak_Goriva(Lit)
-                    opisTroskova, // Opis_Troškova
-                    "", // Neto(€)
-                    isFirstDay ? booking.DepositPaid : "", // PayPal_Uplata(€)
-                    "", // Paypal_Fee(€)
-                    "", // IBAN(€)
-                    "", // Cash(€)
-                    isFirstDay ? (booking.TotalPrice - booking.DepositPaid) : "", // Preostalo_za_Naplatu(€)
-                    DateTime.Now.ToString("d.M.", CultureInfo.InvariantCulture), // Datum_Bukinga
-                    booking.RenterEmail ?? "N/A", // Email
-                    booking.RenterPhone ?? "N/A" // Mobitel
+                    "Nedovršeno",
+                    dateStr,
+                    booking.RenterName ?? "N/A",
+                    booking.BoatName ?? "N/A",
+                    booking.PassengerCount,
+                    timeFormatted,
+                    extrasNote,
+                    booking.FuelIncluded ? "Da" : "Ne",
+                    booking.SkipperRequired ? "Da" : "Ne",
+                    "",
+                    isFirstDay ? booking.TotalPrice : 0,
+                    "",
+                    booking.SkipperRequired ? 70 : "",
+                    "",
+                    opisTroskova,
+                    "",
+                    isFirstDay ? booking.DepositPaid : "",
+                    "",
+                    "",
+                    "",
+                    isFirstDay ? (booking.TotalPrice - booking.DepositPaid) : "",
+                    DateTime.Now.ToString("d.M.", CultureInfo.InvariantCulture),
+                    booking.RenterEmail ?? "N/A",
+                    booking.RenterPhone ?? "N/A"
                 };
 
-                // Upis podataka u raspon A-X za slobodan red
                 string updateRange = $"Evidencija!A{rowIndex}:X{rowIndex}";
                 var valueRange = new ValueRange { Values = new List<IList<object>> { values } };
                 var updateRequest = sheetsService.Spreadsheets.Values.Update(valueRange, spreadsheetId, updateRange);
@@ -535,19 +555,17 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 Console.WriteLine($"Podaci upisani u Evidencija, red {rowIndex}: {string.Join(", ", values)}");
 
-                // Postavljanje dropdowna za stupac Status (A) i Opis_Troškova (O)
                 var dataValidationRequest = new BatchUpdateSpreadsheetRequest
                 {
                     Requests = new List<Request>
                     {
-                        // Dropdown za Status
                         new Request
                         {
                             SetDataValidation = new SetDataValidationRequest
                             {
                                 Range = new GridRange
                                 {
-                                    SheetId = 1240119258, // gid za list "Evidencija"
+                                    SheetId = EVIDENCIJA_SHEET_ID,
                                     StartRowIndex = 1,
                                     EndRowIndex = null,
                                     StartColumnIndex = 0,
@@ -571,17 +589,16 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                 }
                             }
                         },
-                        // Dropdown za Opis_Troškova
                         new Request
                         {
                             SetDataValidation = new SetDataValidationRequest
                             {
                                 Range = new GridRange
                                 {
-                                    SheetId = 1240119258,
+                                    SheetId = EVIDENCIJA_SHEET_ID,
                                     StartRowIndex = 1,
                                     EndRowIndex = null,
-                                    StartColumnIndex = 14, // Stupac O
+                                    StartColumnIndex = 14,
                                     EndColumnIndex = 15
                                 },
                                 Rule = new DataValidationRule
@@ -608,7 +625,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 await sheetsService.Spreadsheets.BatchUpdate(dataValidationRequest, spreadsheetId).ExecuteAsync();
                 Console.WriteLine("Dropdown postavljen za stupce Status i Opis_Troškova u Evidencija.");
 
-                // Postavljanje uvjetnog formatiranja za stupac Status (A)
                 var conditionalFormatRequest = new BatchUpdateSpreadsheetRequest
                 {
                     Requests = new List<Request>
@@ -623,7 +639,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -638,7 +654,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f } // Zeleno
+                                            BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f }
                                         }
                                     }
                                 },
@@ -655,7 +671,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -670,7 +686,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f } // Crveno
+                                            BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f }
                                         }
                                     }
                                 },
@@ -687,7 +703,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -702,7 +718,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f } // Rozo
+                                            BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f }
                                         }
                                     }
                                 },
@@ -719,7 +735,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                     {
                                         new GridRange
                                         {
-                                            SheetId = 1240119258,
+                                            SheetId = EVIDENCIJA_SHEET_ID,
                                             StartRowIndex = 1,
                                             StartColumnIndex = 0,
                                             EndColumnIndex = 1
@@ -734,7 +750,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                                         },
                                         Format = new CellFormat
                                         {
-                                            BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f } // Smeđe
+                                            BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f }
                                         }
                                     }
                                 },
@@ -750,6 +766,325 @@ namespace BoatBookingApp.Frontend.Shared.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"Greška u UpdateEvidenceSheet: {ex.Message}, InnerException: {ex.InnerException?.Message}");
+                throw;
+            }
+        }
+
+        public async Task<List<ConsistencyReport>> GetBookingsFromSheet2025(DateTime date)
+        {
+            try
+            {
+                var result = new List<ConsistencyReport>();
+                string dateStr = date.ToString("d.M.", CultureInfo.InvariantCulture);
+                Console.WriteLine($"Dohvaćanje bukiranja iz Sheet 2025 za datum: {dateStr}");
+
+                using var dbContext = dbContextFactory.CreateDbContext();
+                var transferBookings = await dbContext.TransferBookings
+                    .Where(t =>
+                        (t.DepartureDate.HasValue &&
+                         t.DepartureDate.Value.Year == date.Year &&
+                         t.DepartureDate.Value.Month == date.Month &&
+                         t.DepartureDate.Value.Day == date.Day)
+                        ||
+                        (t.WithReTour && t.ReTourDate.HasValue &&
+                         t.ReTourDate.Value.Year == date.Year &&
+                         t.ReTourDate.Value.Month == date.Month &&
+                         t.ReTourDate.Value.Day == date.Day))
+                    .Select(t => new
+                    {
+                        t.Id,
+                        t.DepartureLocationId,
+                        t.CustomDepartureLocationName,
+                        t.ArrivalLocationId,
+                        t.CustomArrivalLocationName,
+                        t.DepartureDate,
+                        t.ReTourDate,
+                        t.WithReTour
+                    })
+                    .ToListAsync();
+
+                var boatBookings = await dbContext.BoatBookings
+                    .Where(b => b.StartDate.HasValue &&
+                                b.StartDate.Value.Year == date.Year &&
+                                b.StartDate.Value.Month == date.Month &&
+                                b.StartDate.Value.Day == date.Day)
+                    .Select(b => new
+                    {
+                        b.Id,
+                        b.BoatName
+                    })
+                    .ToListAsync();
+
+                var locationList = await dbContext.Locations.AsNoTracking().ToListAsync();
+
+                string range = "2025!A2:W";
+                var getRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range);
+                var getResponse = await getRequest.ExecuteAsync();
+                int rowIndex = -1;
+
+                if (getResponse.Values != null)
+                {
+                    for (int i = 0; i < getResponse.Values.Count; i++)
+                    {
+                        if (getResponse.Values[i].Count > 0)
+                        {
+                            string sheetDate = getResponse.Values[i][0].ToString();
+                            if (DateTime.TryParseExact(sheetDate,
+                                new[] { "d.M.", "d.M.yyyy", "dd.MM.yyyy", "dd-MM-yyyy", "dd/MM/yyyy" },
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
+                                out DateTime parsedSheetDate))
+                            {
+                                if (parsedSheetDate.Date == date.Date)
+                                {
+                                    rowIndex = i + 2;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (rowIndex == -1)
+                {
+                    Console.WriteLine($"Nema zapisa za datum {dateStr} u Sheet 2025.");
+                    return result;
+                }
+
+                string dataRange = $"2025!A{rowIndex}:W{rowIndex}";
+                var dataRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, dataRange);
+                var dataResponse = await dataRequest.ExecuteAsync();
+
+                if (dataResponse.Values != null && dataResponse.Values.Count > 0)
+                {
+                    var row = dataResponse.Values[0];
+                    Console.WriteLine($"Redak {rowIndex} ima {row.Count} stupaca.");
+
+                    // Gliseri (stupci C-S, indeksi 2-18)
+                    string headerRange = "2025!C1:S1";
+                    var headerRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, headerRange);
+                    var headerResponse = await headerRequest.ExecuteAsync();
+                    if (headerResponse.Values != null && headerResponse.Values.Count > 0)
+                    {
+                        var headers = headerResponse.Values[0];
+                        for (int i = 0; i < headers.Count; i++)
+                        {
+                            int columnIndex = i + 2;
+                            if (columnIndex < row.Count && row[columnIndex] != null && row[columnIndex].ToString().Trim() == "ID")
+                            {
+                                string boatName = headers[i].ToString();
+                                int bookingId = boatBookings.FirstOrDefault(b => NormalizeLocationName(b.BoatName).Equals(NormalizeLocationName(boatName), StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
+                                result.Add(new ConsistencyReport
+                                {
+                                    BookingId = bookingId,
+                                    Type = "Boat",
+                                    BoatName = boatName,
+                                    Details = NormalizeLocationName(boatName)
+                                });
+                                Console.WriteLine($"Dodan gliser: BookingId={bookingId}, BoatName={boatName}, Normalized={NormalizeLocationName(boatName)}");
+                            }
+                        }
+                    }
+
+                    // Transferi (stupci T-V, indeksi 19-21)
+                    for (int i = 19; i <= 21; i++)
+                    {
+                        if (i < row.Count && row[i] != null && row[i].ToString().Trim() == "ID")
+                        {
+                            string locations = (row.Count > 22 && row[22] != null) ? row[22].ToString() : "Unknown";
+                            string normalizedDetails = NormalizeTransferDetails(locations);
+
+                            int bookingId = 0;
+                            foreach (var booking in transferBookings)
+                            {
+                                string departureName = booking.DepartureLocationId.HasValue
+                                    ? NormalizeLocationName(locationList.FirstOrDefault(l => l.Id == booking.DepartureLocationId)?.Name ?? $"Unknown_Location_{booking.DepartureLocationId}")
+                                    : NormalizeLocationName(booking.CustomDepartureLocationName ?? "Unknown_Custom");
+                                string arrivalName = booking.ArrivalLocationId.HasValue
+                                    ? NormalizeLocationName(locationList.FirstOrDefault(l => l.Id == booking.ArrivalLocationId)?.Name ?? $"Unknown_Location_{booking.ArrivalLocationId}")
+                                    : NormalizeLocationName(booking.CustomArrivalLocationName ?? "Unknown_Custom");
+
+                                string tourDetails = $"{departureName}-{arrivalName}";
+                                string retourDetails = $"{arrivalName}-{departureName}";
+
+                                bool isRetour = booking.WithReTour && booking.ReTourDate.HasValue && booking.ReTourDate.Value.Date == date.Date;
+                                string expectedDetails = isRetour ? retourDetails : tourDetails;
+
+                                Console.WriteLine($"Usporedba transfera: SheetDetails={normalizedDetails}, ExpectedDetails={expectedDetails}, TourDetails={tourDetails}, RetourDetails={retourDetails}, IsRetour={isRetour}");
+
+                                if (normalizedDetails == expectedDetails)
+                                {
+                                    bookingId = booking.Id;
+                                    break;
+                                }
+                            }
+
+                            result.Add(new ConsistencyReport
+                            {
+                                BookingId = bookingId,
+                                Type = "Transfer",
+                                Locations = normalizedDetails,
+                                Details = normalizedDetails
+                            });
+                            Console.WriteLine($"Dodan transfer: BookingId={bookingId}, Locations={normalizedDetails}");
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"Nema podataka za redak {rowIndex} u Sheet 2025.");
+                }
+
+                Console.WriteLine($"Pronađeno {result.Count} bukiranja u Sheet 2025 za {dateStr}.");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Greška u GetBookingsFromSheet2025: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
+            }
+        }
+
+        public async Task<List<ConsistencyReport>> GetBookingsFromEvidencija(DateTime date)
+        {
+            try
+            {
+                var result = new List<ConsistencyReport>();
+                string dateStr = date.ToString("d.M.", CultureInfo.InvariantCulture);
+                Console.WriteLine($"Dohvaćanje bukiranja iz Evidencija za datum: {dateStr}");
+
+                using var dbContext = dbContextFactory.CreateDbContext();
+                var transferBookings = await dbContext.TransferBookings
+                    .Where(t =>
+                        (t.DepartureDate.HasValue &&
+                         t.DepartureDate.Value.Year == date.Year &&
+                         t.DepartureDate.Value.Month == date.Month &&
+                         t.DepartureDate.Value.Day == date.Day)
+                        ||
+                        (t.WithReTour && t.ReTourDate.HasValue &&
+                         t.ReTourDate.Value.Year == date.Year &&
+                         t.ReTourDate.Value.Month == date.Month &&
+                         t.ReTourDate.Value.Day == date.Day))
+                    .Select(t => new
+                    {
+                        t.Id,
+                        t.DepartureLocationId,
+                        t.CustomDepartureLocationName,
+                        t.ArrivalLocationId,
+                        t.CustomArrivalLocationName,
+                        t.DepartureDate,
+                        t.ReTourDate,
+                        t.WithReTour
+                    })
+                    .ToListAsync();
+
+                var boatBookings = await dbContext.BoatBookings
+                    .Where(b => b.StartDate.HasValue &&
+                                b.StartDate.Value.Year == date.Year &&
+                                b.StartDate.Value.Month == date.Month &&
+                                b.StartDate.Value.Day == date.Day)
+                    .Select(b => new
+                    {
+                        b.Id,
+                        b.BoatName
+                    })
+                    .ToListAsync();
+
+                var locationList = await dbContext.Locations.AsNoTracking().ToListAsync();
+
+                string range = "Evidencija!A2:D";
+                var getRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range);
+                var getResponse = await getRequest.ExecuteAsync();
+
+                if (getResponse.Values != null)
+                {
+                    foreach (var row in getResponse.Values)
+                    {
+                        if (row.Count >= 4)
+                        {
+                            string sheetDate = row[1].ToString();
+                            if (DateTime.TryParseExact(sheetDate,
+                                new[] { "d.M.", "d.M.yyyy", "dd.MM.yyyy", "dd-MM-yyyy", "dd/MM/yyyy" },
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None,
+                                out DateTime parsedSheetDate))
+                            {
+                                if (parsedSheetDate.Date == date.Date)
+                                {
+                                    string status = row[0].ToString();
+                                    if (status != "Conf. poslan" && status != "OK")
+                                    {
+                                        Console.WriteLine($"Preskočen zapis u Evidencija jer status nije 'Conf. poslan' ili 'OK': {status}");
+                                        continue;
+                                    }
+
+                                    string type = row[3].ToString().Contains("-") ? "Transfer" : "Boat";
+                                    string details = NormalizeLocationName(row[3].ToString());
+
+                                    if (type == "Boat")
+                                    {
+                                        int bookingId = boatBookings.FirstOrDefault(b => NormalizeLocationName(b.BoatName).Equals(details, StringComparison.OrdinalIgnoreCase))?.Id ?? 0;
+                                        result.Add(new ConsistencyReport
+                                        {
+                                            BookingId = bookingId,
+                                            Type = type,
+                                            BoatName = details,
+                                            Details = details
+                                        });
+                                        Console.WriteLine($"Dodan zapis iz Evidencija: BookingId={bookingId}, Type={type}, Details={details}");
+                                    }
+                                    else
+                                    {
+                                        int bookingId = 0;
+                                        foreach (var booking in transferBookings)
+                                        {
+                                            string departureName = booking.DepartureLocationId.HasValue
+                                                ? NormalizeLocationName(locationList.FirstOrDefault(l => l.Id == booking.DepartureLocationId)?.Name ?? $"Unknown_Location_{booking.DepartureLocationId}")
+                                                : NormalizeLocationName(booking.CustomDepartureLocationName ?? "Unknown_Custom");
+                                            string arrivalName = booking.ArrivalLocationId.HasValue
+                                                ? NormalizeLocationName(locationList.FirstOrDefault(l => l.Id == booking.ArrivalLocationId)?.Name ?? $"Unknown_Location_{booking.ArrivalLocationId}")
+                                                : NormalizeLocationName(booking.CustomArrivalLocationName ?? "Unknown_Custom");
+
+                                            string tourDetails = $"{departureName}-{arrivalName}";
+                                            string retourDetails = $"{arrivalName}-{departureName}";
+
+                                            bool isRetour = booking.WithReTour && booking.ReTourDate.HasValue && booking.ReTourDate.Value.Date == date.Date;
+                                            string expectedDetails = isRetour ? retourDetails : tourDetails;
+
+                                            Console.WriteLine($"Usporedba Evidencija transfera: SheetDetails={details}, ExpectedDetails={expectedDetails}, TourDetails={tourDetails}, RetourDetails={retourDetails}, IsRetour={isRetour}");
+
+                                            if (details == expectedDetails)
+                                            {
+                                                bookingId = booking.Id;
+                                                break;
+                                            }
+                                        }
+
+                                        result.Add(new ConsistencyReport
+                                        {
+                                            BookingId = bookingId,
+                                            Type = type,
+                                            Locations = details,
+                                            Details = details
+                                        });
+                                        Console.WriteLine($"Dodan zapis iz Evidencija: BookingId={bookingId}, Type={type}, Details={details}");
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Preskočen redak u Evidencija jer ima samo {row.Count} stupaca.");
+                        }
+                    }
+                }
+
+                Console.WriteLine($"Pronađeno {result.Count} bukiranja u Evidencija za {dateStr}.");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Greška u GetBookingsFromEvidencija: {ex.Message}, StackTrace: {ex.StackTrace}");
                 throw;
             }
         }

@@ -3,27 +3,46 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Xceed.Words.NET;
 using BoatBookingApp.Frontend.Shared.Utilities;
 using Xceed.Document.NET;
+using Microsoft.EntityFrameworkCore;
+using BoatBookingApp.Frontend.Shared.Data;
 
 namespace BoatBookingApp.Frontend.Shared.Services
 {
     public class DocumentGenerationService
     {
+        private readonly IDbContextFactory<BoatBookingContext> _dbContextFactory;
+
+        public DocumentGenerationService(IDbContextFactory<BoatBookingContext> dbContextFactory)
+        {
+            _dbContextFactory = dbContextFactory;
+        }
+
+        private string NormalizeLocationName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return "";
+            name = Regex.Replace(name.Trim(), @"\s+", " ");
+            return name;
+        }
+
         public void GenerateDocument(TransferBooking booking, string pickUpLocation, string dropOffLocation, string pickUpMapLink, string dropOffMapLink, List<Location> locations, string templatePath, string outputPath)
         {
             if (!File.Exists(templatePath))
             {
-                throw new FileNotFoundException("Template file not found.", templatePath);
+                throw new FileNotFoundException($"Template file not found: {templatePath}");
             }
 
+            Console.WriteLine($"Generiranje transfer dokumenta: {templatePath} -> {outputPath}");
             using (var doc = DocX.Load(templatePath))
             {
                 doc.ReplaceText(new StringReplaceTextOptions
                 {
                     SearchValue = "{ContactName}",
-                    NewValue = booking.RenterName ?? "Guest"
+                    NewValue = booking.RenterName ?? "N/A"
                 });
 
                 doc.ReplaceText(new StringReplaceTextOptions
@@ -108,7 +127,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 });
 
                 doc.SaveAs(outputPath);
-                Console.WriteLine($"Document saved to: {outputPath}");
+                Console.WriteLine($"Transfer dokument spremljen na: {outputPath}");
             }
         }
 
@@ -116,11 +135,18 @@ namespace BoatBookingApp.Frontend.Shared.Services
         {
             if (!File.Exists(templatePath))
             {
-                throw new FileNotFoundException("Template file not found.", templatePath);
+                throw new FileNotFoundException($"Template file not found: {templatePath}");
             }
 
+            Console.WriteLine($"Generiranje boat dokumenta: {templatePath} -> {outputPath}");
             using (var doc = DocX.Load(templatePath))
             {
+                // Provjera prisutnosti placeholdera
+                if (!doc.Text.Contains("{PassengerCount}"))
+                {
+                    Console.WriteLine("Placeholder {PassengerCount} nije pronađen u templateu!");
+                }
+
                 doc.ReplaceText(new StringReplaceTextOptions
                 {
                     SearchValue = "{ContactName}",
@@ -166,9 +192,17 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     NewValue = booking.BoatName ?? "N/A"
                 });
 
+                Console.WriteLine($"Zamjena {{PassengerCount}} s {booking.PassengerCount}");
                 doc.ReplaceText(new StringReplaceTextOptions
                 {
                     SearchValue = "{PassengerCount}",
+                    NewValue = booking.PassengerCount.ToString()
+                });
+
+                // Fallback za pogrešan placeholder
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{PassengerCount",
                     NewValue = booking.PassengerCount.ToString()
                 });
 
@@ -215,7 +249,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 ReplaceTextWithHyperlink(doc, "{PickUpMapLink}", pickUpMapLink, pickUpMapLink);
 
                 doc.SaveAs(outputPath);
-                Console.WriteLine($"Document saved to: {outputPath}");
+                Console.WriteLine($"Boat dokument spremljen na: {outputPath}");
             }
         }
 
@@ -223,23 +257,19 @@ namespace BoatBookingApp.Frontend.Shared.Services
         {
             if (!string.IsNullOrEmpty(url))
             {
-                // Trim url to remove leading/trailing spaces
                 url = url.Trim();
                 displayText = displayText?.Trim() ?? url;
                 bool replaced = false;
 
                 foreach (var paragraph in doc.Paragraphs)
                 {
-                    // Normaliziraj tekst paragrafa za usporedbu
-                    string paragraphText = paragraph.Text.Replace("\t", "").Trim();
-                    if (paragraphText.Contains(placeholder))
+                    var textElements = paragraph.FindAll(placeholder);
+                    if (textElements.Any())
                     {
                         try
                         {
-                            Console.WriteLine($"Zamjena {placeholder} s hiperlinkom: {url}");
-                            // Zamijeni placeholder praznim tekstom kako bismo izbjegli dupliciranje
+                            Console.WriteLine($"Zamjena {placeholder} s hiperlinkom: {url} u paragrafu: {paragraph.Text}");
                             paragraph.ReplaceText(placeholder, "");
-                            // Dodaj hiperlink kao zaseban element
                             var hyperlink = doc.AddHyperlink(displayText, new Uri(url));
                             paragraph.AppendHyperlink(hyperlink);
                             replaced = true;
@@ -254,11 +284,11 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 if (!replaced)
                 {
-                    Console.WriteLine($"Placeholder {placeholder} nije pronađen u dokumentu!");
-                    // Pokušaj zamijeniti običnim tekstom kao fallback
+                    Console.WriteLine($"Placeholder {placeholder} nije pronađen u dokumentu! Tekst paragrafa: {string.Join(" | ", doc.Paragraphs.Select(p => p.Text))}");
                     foreach (var paragraph in doc.Paragraphs)
                     {
-                        if (paragraph.Text.Contains(placeholder))
+                        var textElements = paragraph.FindAll(placeholder);
+                        if (textElements.Any())
                         {
                             paragraph.ReplaceText(placeholder, displayText);
                         }
@@ -269,13 +299,120 @@ namespace BoatBookingApp.Frontend.Shared.Services
             {
                 foreach (var paragraph in doc.Paragraphs)
                 {
-                    if (paragraph.Text.Contains(placeholder))
+                    var textElements = paragraph.FindAll(placeholder);
+                    if (textElements.Any())
                     {
                         Console.WriteLine($"Placeholder {placeholder} zamijenjen s praznim tekstom jer URL nije definiran.");
                         paragraph.ReplaceText(placeholder, "");
                     }
                 }
             }
+        }
+
+        public async Task<List<ConsistencyReport>> GetDocumentsForDate(DateTime date)
+        {
+            var result = new List<ConsistencyReport>();
+            string dateStr = date.ToString("dd-MM-yyyy");
+            Console.WriteLine($"Skeniranje dokumenata za datum: {dateStr}");
+
+            try
+            {
+                // Putanja za glisere
+                string boatBasePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025", "0_Boats_2025");
+                if (Directory.Exists(boatBasePath))
+                {
+                    var boatFolders = Directory.GetDirectories(boatBasePath)
+                        .Where(d => d.Contains(dateStr) && d.Contains("_Boat_"))
+                        .ToList();
+
+                    foreach (var folder in boatFolders)
+                    {
+                        var folderName = Path.GetFileName(folder);
+                        var parts = folderName.Split('_');
+                        if (parts.Length >= 4 && int.TryParse(parts[0], out var bookingId))
+                        {
+                            string boatName = parts[2];
+                            if (Directory.GetFiles(folder, "*.docx").Any())
+                            {
+                                result.Add(new ConsistencyReport
+                                {
+                                    BookingId = bookingId,
+                                    Type = "Boat",
+                                    BoatName = boatName,
+                                    Details = NormalizeLocationName(boatName)
+                                });
+                                Console.WriteLine($"Pronađen dokument glisera: BookingId={bookingId}, BoatName={boatName}, Normalized={NormalizeLocationName(boatName)}");
+                            }
+                        }
+                    }
+                    Console.WriteLine($"Pronađeno {boatFolders.Count} mapa glisera za {dateStr}.");
+                }
+                else
+                {
+                    Console.WriteLine($"Putanja za glisere ne postoji: {boatBasePath}");
+                }
+
+                // Putanja za transfere
+                string transferBasePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
+                if (Directory.Exists(transferBasePath))
+                {
+                    // Dohvati sve mape transfera
+                    var transferFolders = Directory.GetDirectories(transferBasePath)
+                        .Where(d => d.Contains("_Transfer_"))
+                        .ToList();
+
+                    foreach (var folder in transferFolders)
+                    {
+                        var folderName = Path.GetFileName(folder);
+                        var parts = folderName.Split('_');
+                        if (parts.Length >= 4 && int.TryParse(parts[0], out var bookingId))
+                        {
+                            string locationsPart = parts[2];
+                            string normalizedDetails = NormalizeLocationName(locationsPart);
+
+                            // Provjeri dokumente u mapi
+                            var files = Directory.GetFiles(folder, "*.docx");
+                            foreach (var file in files)
+                            {
+                                string fileName = Path.GetFileName(file);
+                                bool isRetour = fileName.Contains("_ReTour");
+                                string details = isRetour
+                                    ? $"{parts[2].Split('-')[1]}-{parts[2].Split('-')[0]}" // Obrnuti redoslijed za retour
+                                    : normalizedDetails;
+
+                                using var dbContext = _dbContextFactory.CreateDbContext();
+                                var transfer = await dbContext.TransferBookings
+                                    .FirstOrDefaultAsync(t => t.Id == bookingId &&
+                                                              ((t.DepartureDate.HasValue && t.DepartureDate.Value.Date == date.Date && !isRetour) ||
+                                                               (t.WithReTour && t.ReTourDate.HasValue && t.ReTourDate.Value.Date == date.Date && isRetour)));
+
+                                if (transfer != null)
+                                {
+                                    result.Add(new ConsistencyReport
+                                    {
+                                        BookingId = bookingId,
+                                        Type = "Transfer",
+                                        Locations = NormalizeLocationName(details),
+                                        Details = NormalizeLocationName(details)
+                                    });
+                                    Console.WriteLine($"Pronađen dokument transfera: BookingId={bookingId}, Details={details}, File={fileName}");
+                                }
+                            }
+                        }
+                    }
+                    Console.WriteLine($"Pronađeno {transferFolders.Count} mapa transfera.");
+                }
+                else
+                {
+                    Console.WriteLine($"Putanja za transfere ne postoji: {transferBasePath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Greška u GetDocumentsForDate: {ex.Message}, StackTrace: {ex.StackTrace}");
+            }
+
+            return await Task.FromResult(result);
         }
     }
 }
