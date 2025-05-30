@@ -4,6 +4,8 @@
 @using MudBlazor
 @using BoatBookingApp.Frontend.Shared.Data
 @using BoatBookingApp.Frontend.Shared.Services
+@using System.Text.RegularExpressions
+@using System.Globalization
 
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
@@ -87,7 +89,7 @@
         <MudCheckBox T="bool" @bind-Checked="generateDocument" ValueChanged="OnGenerateDocumentChanged" Label="Generate Confirmation Document" />
 
         <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="@(isLoading ? "display: block; margin: 20px auto;" : "display: none;")" />
-        <MudButton Variant="Variant.Filled" Color="MudBlazor.Color.Primary" Disabled="@(!isFormValid)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
+        <MudButton Variant="Variant.Filled" Color="MudBlazor.Color.Primary" Disabled="@(!isFormValid || isSubmitting)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
     </MudForm>
 </MudContainer>
 
@@ -106,12 +108,12 @@
     private MudForm? form;
     private bool isFormValid;
     private TransferBooking booking;
-
     private bool withReTour = false;
     private bool luggage = true;
     private bool fuelIncluded = true;
     private bool generateDocument = false;
     private bool isLoading = false;
+    private bool isSubmitting = false;
     private List<Location> locations = new List<Location>();
     private int? selectedDepartureLocationId;
     private int? selectedArrivalLocationId;
@@ -164,15 +166,25 @@
 
     private async Task Submit()
     {
+        if (isSubmitting)
+        {
+            Console.WriteLine("Submit već u tijeku, ignorira se dodatni poziv.");
+            return;
+        }
+
+        isSubmitting = true;
+        isLoading = true;
+        StateHasChanged();
+
         try
         {
-            isLoading = true;
-            StateHasChanged(); // Prikazati MudProgressCircular
+            Console.WriteLine($"Početak Submit metode, generateDocument: {generateDocument}");
+            Console.WriteLine($"Podaci: DepartureLocationId={selectedDepartureLocationId}, ArrivalLocationId={selectedArrivalLocationId}, DepartureDate={booking.DepartureDate}, ReTourDate={booking.ReTourDate}, WithReTour={withReTour}, PassengerCount={booking.PassengerCount}, RenterName={booking.RenterName}");
 
             using var dbContext = DbContextFactory.CreateDbContext();
             var selectedBooker = await dbContext.Bookers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
+                .AsNoTracking()
+                .FirstOrDefaultAsync(b => b.ShortName == BookerState.SelectedBookerShortName);
             if (selectedBooker != null)
             {
                 booking.BookerId = selectedBooker.Id;
@@ -181,8 +193,8 @@
             booking.DepartureLocationId = selectedDepartureLocationId;
             if (selectedDepartureLocationId == null)
             {
-                booking.CustomDepartureLocation = booking.CustomDepartureLocation ?? string.Empty;
-                booking.CustomDepartureLocationName = booking.CustomDepartureLocationName ?? string.Empty;
+                booking.CustomDepartureLocation = booking.CustomDepartureLocation?.Trim() ?? string.Empty;
+                booking.CustomDepartureLocationName = booking.CustomDepartureLocationName?.Trim() ?? string.Empty;
             }
             else
             {
@@ -193,8 +205,8 @@
             booking.ArrivalLocationId = selectedArrivalLocationId;
             if (selectedArrivalLocationId == null)
             {
-                booking.CustomArrivalLocation = booking.CustomArrivalLocation ?? string.Empty;
-                booking.CustomArrivalLocationName = booking.CustomArrivalLocationName ?? string.Empty;
+                booking.CustomArrivalLocation = booking.CustomArrivalLocation?.Trim() ?? string.Empty;
+                booking.CustomArrivalLocationName = booking.CustomArrivalLocationName?.Trim() ?? string.Empty;
             }
             else
             {
@@ -204,46 +216,105 @@
 
             dbContext.TransferBookings.Add(booking);
             await dbContext.SaveChangesAsync();
+            Console.WriteLine($"Uspješno spremljeno u bazu, Booking ID: {booking.Id}");
 
-            Console.WriteLine($"Submit - generateDocument value: {generateDocument}");
             if (generateDocument)
             {
-                // Dohvati podatke za Google Sheet i Word dokument
                 string pickUpLocation = selectedDepartureLocationId.HasValue
-                ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
-                : booking.CustomDepartureLocationName ?? "N/A";
+                    ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Name ?? "N/A"
+                    : booking.CustomDepartureLocationName ?? "N/A";
                 string dropOffLocation = selectedArrivalLocationId.HasValue
-                ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
-                : booking.CustomArrivalLocationName ?? "N/A";
+                    ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
+                    : booking.CustomArrivalLocationName ?? "N/A";
                 string shortName = BookerState.SelectedBookerShortName ?? "N/A";
                 string pickUpMapLink = selectedDepartureLocationId.HasValue
-                ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link ?? "N/A"
-                : booking.CustomDepartureLocation ?? "N/A";
+                    ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link?.Trim() ?? "N/A"
+                    : booking.CustomDepartureLocation?.Trim() ?? "N/A";
                 string dropOffMapLink = selectedArrivalLocationId.HasValue
-                ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link ?? "N/A"
-                : booking.CustomArrivalLocation ?? "N/A";
+                    ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link?.Trim() ?? "N/A"
+                    : booking.CustomArrivalLocation?.Trim() ?? "N/A";
 
-                // Upis u Google Sheet (oba lista)
-                await GoogleSheetsService.UpdateGoogleSheet(booking.DepartureDate.Value, pickUpLocation, dropOffLocation, booking.PassengerCount, booking.DepartureTime, shortName);
-                await GoogleSheetsService.UpdateEvidenceSheet(booking, pickUpLocation, dropOffLocation, shortName, false); // Tour
-                if (withReTour)
+                Console.WriteLine($"Upis u Google Sheet: pickUpLocation={pickUpLocation}, dropOffLocation={dropOffLocation}, DepartureDate={booking.DepartureDate}");
+                try
                 {
-                    await GoogleSheetsService.UpdateGoogleSheet(booking.ReTourDate.Value, dropOffLocation, pickUpLocation, booking.PassengerCount, booking.ReTourTime, shortName);
-                    await GoogleSheetsService.UpdateEvidenceSheet(booking, pickUpLocation, dropOffLocation, shortName, true); // ReTour
+                    bool exists = await GoogleSheetsService.CheckExistingTransfer(booking.DepartureDate.Value, pickUpLocation, dropOffLocation, booking.PassengerCount, booking.DepartureTime);
+                    if (!exists)
+                    {
+                        await GoogleSheetsService.UpdateGoogleSheet(booking.DepartureDate.Value, pickUpLocation, dropOffLocation, booking.PassengerCount, booking.DepartureTime, shortName);
+                        Console.WriteLine("Uspješno upisano u Google Sheet");
+                    }
+                    else
+                    {
+                        Console.WriteLine("Zapis preskočen jer već postoji u Google Sheetu");
+                    }
+                }
+                catch (InvalidOperationException ex) when (ex.Message == "Tri transfera već bukirana za ovaj datum!")
+                {
+                    Console.WriteLine($"Upozorenje: {ex.Message}");
+                    Snackbar.Add($"Warning: Cannot update Google Sheet - {ex.Message}. Booking saved in database.", Severity.Warning);
                 }
 
-                // Generiranje dokumenata
+                Console.WriteLine($"Upis u Evidenciju: pickUpLocation={pickUpLocation}, dropOffLocation={dropOffLocation}");
+                try
+                {
+                    await GoogleSheetsService.UpdateEvidenceSheet(booking, pickUpLocation, dropOffLocation, shortName, false);
+                    Console.WriteLine("Uspješno upisano u Evidenciju");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Upozorenje: Neuspješan upis u Evidenciju: {ex.Message}");
+                    Snackbar.Add($"Warning: Failed to update Evidencija sheet: {ex.Message}. Booking saved in database.", Severity.Warning);
+                }
+
+                if (withReTour && booking.ReTourDate.HasValue)
+                {
+                    Console.WriteLine($"Upis u Google Sheet za ReTour: pickUpLocation={dropOffLocation}, dropOffLocation={pickUpLocation}, ReTourDate={booking.ReTourDate}");
+                    try
+                    {
+                        bool existsRetour = await GoogleSheetsService.CheckExistingTransfer(booking.ReTourDate.Value, dropOffLocation, pickUpLocation, booking.PassengerCount, booking.ReTourTime);
+                        if (!existsRetour)
+                        {
+                            await GoogleSheetsService.UpdateGoogleSheet(booking.ReTourDate.Value, dropOffLocation, pickUpLocation, booking.PassengerCount, booking.ReTourTime, shortName);
+                            Console.WriteLine("Uspješno upisano u Google Sheet za ReTour");
+                        }
+                        else
+                        {
+                            Console.WriteLine("ReTour zapis preskočen jer već postoji u Google Sheetu");
+                        }
+                    }
+                    catch (InvalidOperationException ex) when (ex.Message == "Tri transfera već bukirana za ovaj datum!")
+                    {
+                        Console.WriteLine($"Upozorenje: {ex.Message}");
+                        Snackbar.Add($"Warning: Cannot update Google Sheet for ReTour - {ex.Message}. Booking saved in database.", Severity.Warning);
+                    }
+
+                    Console.WriteLine($"Upis u Evidenciju za ReTour");
+                    try
+                    {
+                        await GoogleSheetsService.UpdateEvidenceSheet(booking, pickUpLocation, dropOffLocation, shortName, true);
+                        Console.WriteLine("Uspješno upisano u Evidenciju za ReTour");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Upozorenje: Neuspješan upis u Evidenciju za ReTour: {ex.Message}");
+                        Snackbar.Add($"Warning: Failed to update Evidencija sheet for ReTour: {ex.Message}. Booking saved in database.", Severity.Warning);
+                    }
+                }
+
                 string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
-                string baseFileName = $"BookingConfirmation_{booking.Id}{DateTime.Now:yyyyMMdd_HHmmss}";
+                string baseFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
                 string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
-                string renterName = booking.RenterName?.Replace(" ", "") ?? "Guest";
-                string subFolderName = $"{booking.Id}_Transfer_{pickUpLocation}-{dropOffLocation}_{departureDateStr}_{renterName}";
+                string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
+                string sanitizedPickUp = Regex.Replace(pickUpLocation, @"[^a-zA-Z0-9\s_-]", "");
+                string sanitizedDropOff = Regex.Replace(dropOffLocation, @"[^a-zA-Z0-9\s_-]", "");
+                string subFolderName = $"{booking.Id}_Transfer_{sanitizedPickUp}-{sanitizedDropOff}_{departureDateStr}_{renterName}";
 
                 string basePath;
                 try
                 {
                     basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
                     string subFolderPath = Path.Combine(basePath, subFolderName);
+                    Console.WriteLine($"Kreiranje mape: {subFolderPath}");
                     Directory.CreateDirectory(subFolderPath);
                 }
                 catch (Exception ex)
@@ -251,22 +322,21 @@
                     Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
                     basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
                     string subFolderPath = Path.Combine(basePath, subFolderName);
+                    Console.WriteLine($"Kreiranje fallback mape: {subFolderPath}");
                     Directory.CreateDirectory(subFolderPath);
                 }
 
-                // Generiranje Tour dokumenta
                 string tourFileName = $"{baseFileName}_Tour.docx";
                 string tourOutputPath = Path.Combine(basePath, subFolderName, tourFileName);
+                Console.WriteLine($"Generiranje dokumenta: {tourOutputPath}");
                 DocumentGenerationService.GenerateDocument(booking, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, locations, templatePath, tourOutputPath);
 
-                // Generiranje ReTour dokumenta ako je withReTour uključen
                 string generatedPaths = $"Tour document generated at: {tourOutputPath}";
-                if (withReTour)
+                if (withReTour && booking.ReTourDate.HasValue)
                 {
                     string reTourFileName = $"{baseFileName}_ReTour.docx";
                     string reTourOutputPath = Path.Combine(basePath, subFolderName, reTourFileName);
 
-                    // Kreiraj kopiju booking objekta s ReTour podacima
                     var reTourBooking = new TransferBooking
                         {
                             RenterName = booking.RenterName,
@@ -281,11 +351,11 @@
                             DepositPaid = booking.DepositPaid
                         };
 
+                    Console.WriteLine($"Generiranje ReTour dokumenta: {reTourOutputPath}");
                     DocumentGenerationService.GenerateDocument(reTourBooking, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, locations, templatePath, reTourOutputPath);
                     generatedPaths += $"\nReTour document generated at: {reTourOutputPath}";
                 }
 
-                // Resetiranje forme nakon uspješnog slanja
                 booking = new TransferBooking
                     {
                         WithReTour = false,
@@ -298,16 +368,15 @@
                 generateDocument = false;
                 selectedDepartureLocationId = null;
                 selectedArrivalLocationId = null;
-                form?.ResetValidation(); // Resetiraj validaciju forme
+                form?.ResetValidation();
                 isLoading = false;
-                StateHasChanged(); // Ažuriraj UI za sakrivanje spinners i reset forme
+                isSubmitting = false;
+                StateHasChanged();
 
-                Snackbar.Add($"Booking saved, sheets (2025 and Evidencija) updated, and documents generated:\n{generatedPaths}", Severity.Info);
-                Snackbar.Add("Sent Successfully!", Severity.Success);
+                Snackbar.Add($"Booking saved and documents generated:\n{generatedPaths}", Severity.Success);
             }
             else
             {
-                // Resetiranje forme nakon uspješnog slanja bez dokumenata
                 booking = new TransferBooking
                     {
                         WithReTour = false,
@@ -320,19 +389,21 @@
                 generateDocument = false;
                 selectedDepartureLocationId = null;
                 selectedArrivalLocationId = null;
-                form?.ResetValidation(); // Resetiraj validaciju forme
+                form?.ResetValidation();
                 isLoading = false;
-                StateHasChanged(); // Ažuriraj UI za sakrivanje spinners i reset forme
+                isSubmitting = false;
+                StateHasChanged();
 
-                Snackbar.Add("Sent Successfully!", Severity.Success);
+                Snackbar.Add("Booking saved successfully!", Severity.Success);
             }
         }
         catch (Exception ex)
         {
             isLoading = false;
-            StateHasChanged(); // Sakriti MudProgressCircular u slučaju greške
-            Console.WriteLine($"Greška u Submit: {ex.Message}, InnerException: {ex.InnerException?.Message}");
-            Snackbar.Add($"Sent Error: {ex.Message}, Inner: {ex.InnerException?.Message}", Severity.Error);
+            isSubmitting = false;
+            StateHasChanged();
+            Console.WriteLine($"Greška u Submit: {ex.Message}, StackTrace: {ex.StackTrace}, InnerException: {ex.InnerException?.Message}");
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
         }
     }
 }

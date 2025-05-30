@@ -61,7 +61,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
         {
             if (string.IsNullOrEmpty(name))
                 return "";
-            // Zamijeni višestruke razmake s jednim, zadrži razmake
             name = Regex.Replace(name.Trim(), @"\s+", " ");
             return name;
         }
@@ -70,12 +69,50 @@ namespace BoatBookingApp.Frontend.Shared.Services
         {
             if (string.IsNullOrEmpty(details))
                 return "";
-            // Ukloni prefiks T1/T2/T3 i dodatne informacije
             var match = Regex.Match(details, @"^T\d: (.*?)(?:,|$)");
             string normalized = match.Success ? match.Groups[1].Value.Trim() : details;
-            // Normaliziraj svaku lokaciju
             var parts = normalized.Split('-').Select(NormalizeLocationName).ToArray();
             return parts.Length >= 2 ? $"{parts[0]}-{parts[1]}" : normalized;
+        }
+
+        public async Task<bool> CheckExistingTransfer(DateTime date, string pickUpLocation, string dropOffLocation, int passengerCount, TimeSpan? time)
+        {
+            try
+            {
+                string dateStr = date.ToString("d.M.", CultureInfo.InvariantCulture);
+                string checkRange = $"2025!A2:W";
+                var checkRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, checkRange);
+                var checkResponse = await checkRequest.ExecuteAsync();
+
+                if (checkResponse.Values != null)
+                {
+                    for (int i = 0; i < checkResponse.Values.Count; i++)
+                    {
+                        if (checkResponse.Values[i].Count > 0 && checkResponse.Values[i][0].ToString() == dateStr)
+                        {
+                            if (checkResponse.Values[i].Count > 22 && checkResponse.Values[i][22] != null)
+                            {
+                                string note = checkResponse.Values[i][22].ToString();
+                                string expectedNote = $"T1: {NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}, {passengerCount} osobe, polazak u {time?.ToString("hh\\:mm")}";
+                                string expectedNote2 = $"T2: {NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}, {passengerCount} osobe, polazak u {time?.ToString("hh\\:mm")}";
+                                string expectedNote3 = $"T3: {NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}, {passengerCount} osobe, polazak u {time?.ToString("hh\\:mm")}";
+
+                                if (note.Contains(expectedNote) || note.Contains(expectedNote2) || note.Contains(expectedNote3))
+                                {
+                                    Console.WriteLine($"Zapis već postoji u Sheetu za {pickUpLocation}-{dropOffLocation} na datum {dateStr}");
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Greška u CheckExistingTransfer: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
+            }
         }
 
         public async Task UpdateGoogleSheet(DateTime date, string pickUpLocation, string dropOffLocation, int passengerCount, TimeSpan? time, string shortName, string boatName = null, bool skipperRequired = false)
@@ -269,6 +306,8 @@ namespace BoatBookingApp.Frontend.Shared.Services
         {
             try
             {
+                Console.WriteLine($"UpdateEvidenceSheet: isReTour={isReTour}, DepartureTime={booking.DepartureTime}, ReTourTime={booking.ReTourTime}");
+
                 string range = "Evidencija!A2:A";
                 var getRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range);
                 var getResponse = await getRequest.ExecuteAsync();
@@ -276,7 +315,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 Console.WriteLine($"Pronađen slobodan red u Evidencija: {rowIndex}");
 
                 string dateStr = isReTour ? booking.ReTourDate?.ToString("d.M.", CultureInfo.InvariantCulture) ?? "N/A" : booking.DepartureDate?.ToString("d.M.", CultureInfo.InvariantCulture) ?? "N/A";
-                string timeFormatted = isReTour ? (booking.ReTourTime.HasValue ? $"{booking.ReTourTime.Value.Hours:D2}:{booking.ReTourTime.Value.Minutes:D2}" : "N/A") : (booking.DepartureTime.HasValue ? $"{booking.DepartureTime.Value.Hours:D2}:{booking.ReTourTime.Value.Minutes:D2}" : "N/A");
+                string timeFormatted = isReTour ? (booking.ReTourTime.HasValue ? $"{booking.ReTourTime.Value.Hours:D2}:{booking.ReTourTime.Value.Minutes:D2}" : "N/A") : (booking.DepartureTime.HasValue ? $"{booking.DepartureTime.Value.Hours:D2}:{booking.DepartureTime.Value.Minutes:D2}" : "N/A");
                 string locationStr = isReTour ? $"{NormalizeLocationName(dropOffLocation)}-{NormalizeLocationName(pickUpLocation)}" : $"{NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}";
                 decimal brutto = isReTour ? 0 : booking.TotalPrice;
 
@@ -313,190 +352,196 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 var updateRequest = sheetsService.Spreadsheets.Values.Update(valueRange, spreadsheetId, updateRange);
                 updateRequest.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
                 await updateRequest.ExecuteAsync();
-
                 Console.WriteLine($"Podaci upisani u Evidencija, red {rowIndex}: {string.Join(", ", values)}");
 
-                var dataValidationRequest = new BatchUpdateSpreadsheetRequest
+                try
                 {
-                    Requests = new List<Request>
+                    var dataValidationRequest = new BatchUpdateSpreadsheetRequest
                     {
-                        new Request
+                        Requests = new List<Request>
                         {
-                            SetDataValidation = new SetDataValidationRequest
+                            new Request
                             {
-                                Range = new GridRange
+                                SetDataValidation = new SetDataValidationRequest
                                 {
-                                    SheetId = EVIDENCIJA_SHEET_ID,
-                                    StartRowIndex = 1,
-                                    EndRowIndex = null,
-                                    StartColumnIndex = 0,
-                                    EndColumnIndex = 1
-                                },
-                                Rule = new DataValidationRule
-                                {
-                                    Condition = new BooleanCondition
+                                    Range = new GridRange
                                     {
-                                        Type = "ONE_OF_LIST",
-                                        Values = new List<ConditionValue>
-                                        {
-                                            new ConditionValue { UserEnteredValue = "Nedovršeno" },
-                                            new ConditionValue { UserEnteredValue = "OK" },
-                                            new ConditionValue { UserEnteredValue = "Conf. poslan" },
-                                            new ConditionValue { UserEnteredValue = "Otkazano" }
-                                        }
+                                        SheetId = EVIDENCIJA_SHEET_ID,
+                                        StartRowIndex = 1,
+                                        EndRowIndex = null,
+                                        StartColumnIndex = 0,
+                                        EndColumnIndex = 1
                                     },
-                                    Strict = true,
-                                    ShowCustomUi = true
+                                    Rule = new DataValidationRule
+                                    {
+                                        Condition = new BooleanCondition
+                                        {
+                                            Type = "ONE_OF_LIST",
+                                            Values = new List<ConditionValue>
+                                            {
+                                                new ConditionValue { UserEnteredValue = "Nedovršeno" },
+                                                new ConditionValue { UserEnteredValue = "OK" },
+                                                new ConditionValue { UserEnteredValue = "Conf. poslan" },
+                                                new ConditionValue { UserEnteredValue = "Otkazano" }
+                                            }
+                                        },
+                                        Strict = true,
+                                        ShowCustomUi = true
+                                    }
                                 }
                             }
                         }
-                    }
-                };
+                    };
 
-                await sheetsService.Spreadsheets.BatchUpdate(dataValidationRequest, spreadsheetId).ExecuteAsync();
-                Console.WriteLine("Dropdown postavljen za stupac Status u Evidencija.");
+                    await sheetsService.Spreadsheets.BatchUpdate(dataValidationRequest, spreadsheetId).ExecuteAsync();
+                    Console.WriteLine("Dropdown postavljen za stupac Status u Evidencija.");
 
-                var conditionalFormatRequest = new BatchUpdateSpreadsheetRequest
-                {
-                    Requests = new List<Request>
+                    var conditionalFormatRequest = new BatchUpdateSpreadsheetRequest
                     {
-                        new Request
+                        Requests = new List<Request>
                         {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "OK" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "OK" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f }
-                                        }
-                                    }
-                                },
-                                Index = 0
-                            }
-                        },
-                        new Request
-                        {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                                    Index = 0
+                                }
+                            },
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Otkazano" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Otkazano" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f }
-                                        }
-                                    }
-                                },
-                                Index = 0
-                            }
-                        },
-                        new Request
-                        {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                                    Index = 0
+                                }
+                            },
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Nedovršeno" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Nedovršeno" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f }
-                                        }
-                                    }
-                                },
-                                Index = 0
-                            }
-                        },
-                        new Request
-                        {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                                    Index = 0
+                                }
+                            },
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Conf. poslan" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Conf. poslan" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f }
-                                        }
-                                    }
-                                },
-                                Index = 0
+                                    Index = 0
+                                }
                             }
                         }
-                    }
-                };
+                    };
 
-                await sheetsService.Spreadsheets.BatchUpdate(conditionalFormatRequest, spreadsheetId).ExecuteAsync();
-                Console.WriteLine("Uvjetno formatiranje postavljeno za stupac Status u Evidencija.");
+                    await sheetsService.Spreadsheets.BatchUpdate(conditionalFormatRequest, spreadsheetId).ExecuteAsync();
+                    Console.WriteLine("Uvjetno formatiranje postavljeno za stupac Status u Evidencija.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Upozorenje: Neuspješno postavljanje dropdowna/formatiranja u Evidenciji: {ex.Message}, InnerException: {ex.InnerException?.Message}");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Greška u UpdateEvidenceSheet: {ex.Message}, InnerException: {ex.InnerException?.Message}");
+                Console.WriteLine($"Greška u UpdateEvidenceSheet: {ex.Message}, StackTrace: {ex.StackTrace}, InnerException: {ex.InnerException?.Message}");
                 throw;
             }
         }
@@ -555,217 +600,224 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 Console.WriteLine($"Podaci upisani u Evidencija, red {rowIndex}: {string.Join(", ", values)}");
 
-                var dataValidationRequest = new BatchUpdateSpreadsheetRequest
+                try
                 {
-                    Requests = new List<Request>
+                    var dataValidationRequest = new BatchUpdateSpreadsheetRequest
                     {
-                        new Request
+                        Requests = new List<Request>
                         {
-                            SetDataValidation = new SetDataValidationRequest
+                            new Request
                             {
-                                Range = new GridRange
+                                SetDataValidation = new SetDataValidationRequest
                                 {
-                                    SheetId = EVIDENCIJA_SHEET_ID,
-                                    StartRowIndex = 1,
-                                    EndRowIndex = null,
-                                    StartColumnIndex = 0,
-                                    EndColumnIndex = 1
-                                },
-                                Rule = new DataValidationRule
-                                {
-                                    Condition = new BooleanCondition
+                                    Range = new GridRange
                                     {
-                                        Type = "ONE_OF_LIST",
-                                        Values = new List<ConditionValue>
-                                        {
-                                            new ConditionValue { UserEnteredValue = "Nedovršeno" },
-                                            new ConditionValue { UserEnteredValue = "OK" },
-                                            new ConditionValue { UserEnteredValue = "Conf. poslan" },
-                                            new ConditionValue { UserEnteredValue = "Otkazano" }
-                                        }
+                                        SheetId = EVIDENCIJA_SHEET_ID,
+                                        StartRowIndex = 1,
+                                        EndRowIndex = null,
+                                        StartColumnIndex = 0,
+                                        EndColumnIndex = 1
                                     },
-                                    Strict = true,
-                                    ShowCustomUi = true
+                                    Rule = new DataValidationRule
+                                    {
+                                        Condition = new BooleanCondition
+                                        {
+                                            Type = "ONE_OF_LIST",
+                                            Values = new List<ConditionValue>
+                                            {
+                                                new ConditionValue { UserEnteredValue = "Nedovršeno" },
+                                                new ConditionValue { UserEnteredValue = "OK" },
+                                                new ConditionValue { UserEnteredValue = "Conf. poslan" },
+                                                new ConditionValue { UserEnteredValue = "Otkazano" }
+                                            }
+                                        },
+                                        Strict = true,
+                                        ShowCustomUi = true
+                                    }
                                 }
-                            }
-                        },
-                        new Request
-                        {
-                            SetDataValidation = new SetDataValidationRequest
+                            },
+                            new Request
                             {
-                                Range = new GridRange
+                                SetDataValidation = new SetDataValidationRequest
                                 {
-                                    SheetId = EVIDENCIJA_SHEET_ID,
-                                    StartRowIndex = 1,
-                                    EndRowIndex = null,
-                                    StartColumnIndex = 14,
-                                    EndColumnIndex = 15
-                                },
-                                Rule = new DataValidationRule
-                                {
-                                    Condition = new BooleanCondition
+                                    Range = new GridRange
                                     {
-                                        Type = "ONE_OF_LIST",
-                                        Values = new List<ConditionValue>
-                                        {
-                                            new ConditionValue { UserEnteredValue = "g" },
-                                            new ConditionValue { UserEnteredValue = "g+s" },
-                                            new ConditionValue { UserEnteredValue = "s" },
-                                            new ConditionValue { UserEnteredValue = "" }
-                                        }
+                                        SheetId = EVIDENCIJA_SHEET_ID,
+                                        StartRowIndex = 1,
+                                        EndRowIndex = null,
+                                        StartColumnIndex = 14,
+                                        EndColumnIndex = 15
                                     },
-                                    Strict = true,
-                                    ShowCustomUi = true
+                                    Rule = new DataValidationRule
+                                    {
+                                        Condition = new BooleanCondition
+                                        {
+                                            Type = "ONE_OF_LIST",
+                                            Values = new List<ConditionValue>
+                                            {
+                                                new ConditionValue { UserEnteredValue = "g" },
+                                                new ConditionValue { UserEnteredValue = "g+s" },
+                                                new ConditionValue { UserEnteredValue = "s" },
+                                                new ConditionValue { UserEnteredValue = "" }
+                                            }
+                                        },
+                                        Strict = true,
+                                        ShowCustomUi = true
+                                    }
                                 }
                             }
                         }
-                    }
-                };
+                    };
 
-                await sheetsService.Spreadsheets.BatchUpdate(dataValidationRequest, spreadsheetId).ExecuteAsync();
-                Console.WriteLine("Dropdown postavljen za stupce Status i Opis_Troškova u Evidencija.");
+                    await sheetsService.Spreadsheets.BatchUpdate(dataValidationRequest, spreadsheetId).ExecuteAsync();
+                    Console.WriteLine("Dropdown postavljen za stupce Status i Opis_Troškova u Evidencija.");
 
-                var conditionalFormatRequest = new BatchUpdateSpreadsheetRequest
-                {
-                    Requests = new List<Request>
+                    var conditionalFormatRequest = new BatchUpdateSpreadsheetRequest
                     {
-                        new Request
+                        Requests = new List<Request>
                         {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "OK" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "OK" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 0f, Green = 1f, Blue = 0f }
-                                        }
-                                    }
-                                },
-                                Index = 0
-                            }
-                        },
-                        new Request
-                        {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                                    Index = 0
+                                }
+                            },
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Otkazano" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Otkazano" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0f, Blue = 0f }
-                                        }
-                                    }
-                                },
-                                Index = 0
-                            }
-                        },
-                        new Request
-                        {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                                    Index = 0
+                                }
+                            },
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Nedovršeno" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Nedovršeno" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 1f, Green = 0.7529f, Blue = 0.7961f }
-                                        }
-                                    }
-                                },
-                                Index = 0
-                            }
-                        },
-                        new Request
-                        {
-                            AddConditionalFormatRule = new AddConditionalFormatRuleRequest
+                                    Index = 0
+                                }
+                            },
+                            new Request
                             {
-                                Rule = new ConditionalFormatRule
+                                AddConditionalFormatRule = new AddConditionalFormatRuleRequest
                                 {
-                                    Ranges = new List<GridRange>
+                                    Rule = new ConditionalFormatRule
                                     {
-                                        new GridRange
+                                        Ranges = new List<GridRange>
                                         {
-                                            SheetId = EVIDENCIJA_SHEET_ID,
-                                            StartRowIndex = 1,
-                                            StartColumnIndex = 0,
-                                            EndColumnIndex = 1
+                                            new GridRange
+                                            {
+                                                SheetId = EVIDENCIJA_SHEET_ID,
+                                                StartRowIndex = 1,
+                                                StartColumnIndex = 0,
+                                                EndColumnIndex = 1
+                                            }
+                                        },
+                                        BooleanRule = new BooleanRule
+                                        {
+                                            Condition = new BooleanCondition
+                                            {
+                                                Type = "TEXT_EQ",
+                                                Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Conf. poslan" } }
+                                            },
+                                            Format = new CellFormat
+                                            {
+                                                BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f }
+                                            }
                                         }
                                     },
-                                    BooleanRule = new BooleanRule
-                                    {
-                                        Condition = new BooleanCondition
-                                        {
-                                            Type = "TEXT_EQ",
-                                            Values = new List<ConditionValue> { new ConditionValue { UserEnteredValue = "Conf. poslan" } }
-                                        },
-                                        Format = new CellFormat
-                                        {
-                                            BackgroundColor = new Color { Red = 0.5451f, Green = 0.2706f, Blue = 0.0745f }
-                                        }
-                                    }
-                                },
-                                Index = 0
+                                    Index = 0
+                                }
                             }
                         }
-                    }
-                };
+                    };
 
-                await sheetsService.Spreadsheets.BatchUpdate(conditionalFormatRequest, spreadsheetId).ExecuteAsync();
-                Console.WriteLine("Uvjetno formatiranje postavljeno za stupac Status u Evidencija.");
+                    await sheetsService.Spreadsheets.BatchUpdate(conditionalFormatRequest, spreadsheetId).ExecuteAsync();
+                    Console.WriteLine("Uvjetno formatiranje postavljeno za stupac Status u Evidencija.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Upozorenje: Neuspješno postavljanje dropdowna/formatiranja u Evidenciji: {ex.Message}, InnerException: {ex.InnerException?.Message}");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Greška u UpdateEvidenceSheet: {ex.Message}, InnerException: {ex.InnerException?.Message}");
+                Console.WriteLine($"Greška u UpdateEvidenceSheet: {ex.Message}, StackTrace: {ex.StackTrace}, InnerException: {ex.InnerException?.Message}");
                 throw;
             }
         }
@@ -860,7 +912,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     var row = dataResponse.Values[0];
                     Console.WriteLine($"Redak {rowIndex} ima {row.Count} stupaca.");
 
-                    // Gliseri (stupci C-S, indeksi 2-18)
                     string headerRange = "2025!C1:S1";
                     var headerRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, headerRange);
                     var headerResponse = await headerRequest.ExecuteAsync();
@@ -886,7 +937,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
                         }
                     }
 
-                    // Transferi (stupci T-V, indeksi 19-21)
                     for (int i = 19; i <= 21; i++)
                     {
                         if (i < row.Count && row[i] != null && row[i].ToString().Trim() == "ID")
