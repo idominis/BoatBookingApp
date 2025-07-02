@@ -170,7 +170,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 int columnIndex;
                 if (boatName != null)
                 {
-                    string headerRange = "2025!C1:S1";
+                    string headerRange = "2025!C1:T1"; // Ažurirano na C1:T1 zbog novog stupca
                     var headerRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, headerRange);
                     var headerResponse = await headerRequest.ExecuteAsync();
                     columnIndex = -1;
@@ -181,7 +181,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                         {
                             if (headerResponse.Values[0][i].ToString().Equals(boatName, StringComparison.OrdinalIgnoreCase))
                             {
-                                columnIndex = i + 3;
+                                columnIndex = i + 3; // Stupac C je indeks 3
                                 Console.WriteLine($"Pronađen stupac za gliser: {boatName}, columnIndex: {columnIndex}");
                                 break;
                             }
@@ -190,19 +190,19 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                     if (columnIndex == -1)
                     {
-                        throw new InvalidOperationException($"Gliser {boatName} nije pronađen u stupcima C-S!");
+                        throw new InvalidOperationException($"Gliser {boatName} nije pronađen u stupcima C-T!");
                     }
                 }
                 else
                 {
-                    string checkRange = $"2025!T{rowIndex}:V{rowIndex}";
+                    string checkRange = $"2025!U{rowIndex}:W{rowIndex}"; // Ažurirano na U:W zbog pomaka
                     var checkRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, checkRange);
                     var checkResponse = await checkRequest.ExecuteAsync();
 
                     columnIndex = -1;
                     if (checkResponse.Values == null || checkResponse.Values.Count == 0 || checkResponse.Values[0].Count < 3)
                     {
-                        columnIndex = checkResponse.Values == null || checkResponse.Values[0].Count == 0 ? 20 : checkResponse.Values[0].Count + 20;
+                        columnIndex = checkResponse.Values == null || checkResponse.Values[0].Count == 0 ? 21 : checkResponse.Values[0].Count + 21; // Početak od U (indeks 21)
                     }
                     else if (checkResponse.Values[0].Count == 3)
                     {
@@ -256,15 +256,15 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 if (boatName == null)
                 {
-                    string noteRange = $"2025!W{rowIndex}";
+                    string noteRange = $"2025!X{rowIndex}"; // Ažurirano na X zbog pomaka
                     var noteGetRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, noteRange);
                     var noteGetResponse = await noteGetRequest.ExecuteAsync();
                     string existingNote = noteGetResponse.Values != null && noteGetResponse.Values.Count > 0 && noteGetResponse.Values[0].Count > 0
                         ? noteGetResponse.Values[0][0].ToString()
                         : "";
-                    Console.WriteLine($"Postojeća napomena u W: {existingNote}");
+                    Console.WriteLine($"Postojeća napomena u X: {existingNote}");
 
-                    string transferPrefix = (columnIndex - 20) switch
+                    string transferPrefix = (columnIndex - 21) switch // Ažurirano na 21 (stupac U)
                     {
                         0 => "T1",
                         1 => "T2",
@@ -869,7 +869,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 var locationList = await dbContext.Locations.AsNoTracking().ToListAsync();
 
-                string range = "2025!A2:W";
+                string range = "2025!A2:X"; // Ažurirano na X zbog pomaka
                 var getRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range);
                 var getResponse = await getRequest.ExecuteAsync();
                 int rowIndex = -1;
@@ -903,7 +903,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     return result;
                 }
 
-                string dataRange = $"2025!A{rowIndex}:W{rowIndex}";
+                string dataRange = $"2025!A{rowIndex}:X{rowIndex}"; // Ažurirano na X
                 var dataRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, dataRange);
                 var dataResponse = await dataRequest.ExecuteAsync();
 
@@ -912,7 +912,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     var row = dataResponse.Values[0];
                     Console.WriteLine($"Redak {rowIndex} ima {row.Count} stupaca.");
 
-                    string headerRange = "2025!C1:S1";
+                    string headerRange = "2025!C1:T1"; // Ažurirano na C1:T1
                     var headerRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, headerRange);
                     var headerResponse = await headerRequest.ExecuteAsync();
                     if (headerResponse.Values != null && headerResponse.Values.Count > 0)
@@ -937,11 +937,11 @@ namespace BoatBookingApp.Frontend.Shared.Services
                         }
                     }
 
-                    for (int i = 19; i <= 21; i++)
+                    for (int i = 20; i <= 22; i++) // Ažurirano na 20-22 (U-W)
                     {
                         if (i < row.Count && row[i] != null && row[i].ToString().Trim() == "ID")
                         {
-                            string locations = (row.Count > 22 && row[22] != null) ? row[22].ToString() : "Unknown";
+                            string locations = (row.Count > 23 && row[23] != null) ? row[23].ToString() : "Unknown"; // Ažurirano na 23 (X)
                             string normalizedDetails = NormalizeTransferDetails(locations);
 
                             int bookingId = 0;
