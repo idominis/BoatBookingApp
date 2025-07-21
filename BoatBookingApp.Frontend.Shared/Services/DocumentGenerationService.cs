@@ -29,7 +29,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
             return name;
         }
 
-        public void GenerateDocument(TransferBooking booking, string pickUpLocation, string dropOffLocation, string pickUpMapLink, string dropOffMapLink, List<Location> locations, string templatePath, string outputPath)
+        public void GenerateDocument(TransferBooking booking, string pickUpLocation, string dropOffLocation, string pickUpMapLink, string dropOffMapLink, List<Location> locations, string templatePath, string outputPath, bool isNotesTemplate = false)
         {
             if (!File.Exists(templatePath))
             {
@@ -67,11 +67,35 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 ReplaceTextWithHyperlink(doc, "{DropOffMapLink}", dropOffMapLink, dropOffMapLink);
 
-                string dateWithOrdinal = Utility.GetDateWithOrdinal(booking.DepartureDate);
+                // Different date formatting based on template type
+                string dateFormatted;
+                if (isNotesTemplate)
+                {
+                    // Croatian format dd/MM/yyyy for Notes template
+                    dateFormatted = booking.DepartureDate.HasValue 
+                        ? booking.DepartureDate.Value.ToString("dd/MM/yyyy")
+                        : "N/A";
+                }
+                else
+                {
+                    // English format with ordinal for other templates
+                    dateFormatted = Utility.GetDateWithOrdinal(booking.DepartureDate) ?? "N/A";
+                }
+                
                 doc.ReplaceText(new StringReplaceTextOptions
                 {
                     SearchValue = "{Date}",
-                    NewValue = dateWithOrdinal ?? "N/A"
+                    NewValue = dateFormatted
+                });
+
+                // Add DayOfTheWeak handling
+                string dayOfWeek = booking.DepartureDate.HasValue 
+                    ? booking.DepartureDate.Value.ToString("dddd", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
+                    : "N/A";
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{DayOfTheWeak}",
+                    NewValue = dayOfWeek
                 });
 
                 string timeFormatted = booking.DepartureTime.HasValue
@@ -131,7 +155,7 @@ namespace BoatBookingApp.Frontend.Shared.Services
             }
         }
 
-        public void GenerateBoatBookingDocument(BoatBooking booking, string pickUpMapLink, IEnumerable<Extra> selectedExtras, string templatePath, string outputPath)
+        public void GenerateBoatBookingDocument(BoatBooking booking, string pickUpMapLink, IEnumerable<Extra> selectedExtras, string templatePath, string outputPath, bool isNotesTemplate = false)
         {
             if (!File.Exists(templatePath))
             {
@@ -159,11 +183,35 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     NewValue = booking.RenterPhone ?? "N/A"
                 });
 
-                string dateWithOrdinal = Utility.GetDateWithOrdinal(booking.StartDate);
+                // Different date formatting based on template type
+                string dateFormatted;
+                if (isNotesTemplate)
+                {
+                    // Croatian format dd/mm/yyyy for Notes template
+                    dateFormatted = booking.StartDate.HasValue 
+                        ? booking.StartDate.Value.ToString("dd/MM/yyyy")
+                        : "N/A";
+                }
+                else
+                {
+                    // English format with ordinal for other templates
+                    dateFormatted = Utility.GetDateWithOrdinal(booking.StartDate) ?? "N/A";
+                }
+                
                 doc.ReplaceText(new StringReplaceTextOptions
                 {
                     SearchValue = "{Date}",
-                    NewValue = dateWithOrdinal ?? "N/A"
+                    NewValue = dateFormatted
+                });
+
+                // Add DayOfTheWeak handling
+                string dayOfWeek = booking.StartDate.HasValue 
+                    ? booking.StartDate.Value.ToString("dddd", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
+                    : "N/A";
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{DayOfTheWeak}",
+                    NewValue = dayOfWeek
                 });
 
                 string pickupTimeFormatted = booking.PickupTime.HasValue

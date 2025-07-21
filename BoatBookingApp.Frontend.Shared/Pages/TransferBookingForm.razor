@@ -302,7 +302,10 @@
                 }
 
                 string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
+                // Add Notes template path
+                string notesTemplatePath = Path.Combine("wwwroot", "templates", "Notes_Transfer_Template.docx");
                 string baseFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
+                string notesBaseFileName = $"Notes_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
                 string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
                 string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
                 string sanitizedPickUp = Regex.Replace(pickUpLocation, @"[^a-zA-Z0-9\s_-]", "");
@@ -327,15 +330,33 @@
                 }
 
                 string tourFileName = $"{baseFileName}_Tour.docx";
+                string notesTourFileName = $"{notesBaseFileName}_Tour.docx";
                 string tourOutputPath = Path.Combine(basePath, subFolderName, tourFileName);
+                string notesTourOutputPath = Path.Combine(basePath, subFolderName, notesTourFileName);
                 Console.WriteLine($"Generiranje dokumenta: {tourOutputPath}");
+                Console.WriteLine($"Generiranje Notes dokumenta: {notesTourOutputPath}");
+
+                // Generate main Tour document
                 DocumentGenerationService.GenerateDocument(booking, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, locations, templatePath, tourOutputPath);
 
-                string generatedPaths = $"Tour document generated at: {tourOutputPath}";
+                // Generate Notes Tour document with Croatian date format
+                if (File.Exists(notesTemplatePath))
+                {
+                    DocumentGenerationService.GenerateDocument(booking, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, locations, notesTemplatePath, notesTourOutputPath, true);
+                }
+
+                string generatedPaths = $"Tour documents generated at: {tourOutputPath}";
+                if (File.Exists(notesTemplatePath))
+                {
+                    generatedPaths += $" and {notesTourOutputPath}";
+                }
+
                 if (withReTour && booking.ReTourDate.HasValue)
                 {
                     string reTourFileName = $"{baseFileName}_ReTour.docx";
+                    string notesReTourFileName = $"{notesBaseFileName}_ReTour.docx";
                     string reTourOutputPath = Path.Combine(basePath, subFolderName, reTourFileName);
+                    string notesReTourOutputPath = Path.Combine(basePath, subFolderName, notesReTourFileName);
 
                     var reTourBooking = new TransferBooking
                         {
@@ -352,8 +373,22 @@
                         };
 
                     Console.WriteLine($"Generiranje ReTour dokumenta: {reTourOutputPath}");
+                    Console.WriteLine($"Generiranje Notes ReTour dokumenta: {notesReTourOutputPath}");
+                    
+                    // Generate main ReTour document
                     DocumentGenerationService.GenerateDocument(reTourBooking, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, locations, templatePath, reTourOutputPath);
-                    generatedPaths += $"\nReTour document generated at: {reTourOutputPath}";
+                    
+                    // Generate Notes ReTour document with Croatian date format
+                    if (File.Exists(notesTemplatePath))
+                    {
+                        DocumentGenerationService.GenerateDocument(reTourBooking, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, locations, notesTemplatePath, notesReTourOutputPath, true);
+                    }
+                    
+                    generatedPaths += $"\nReTour documents generated at: {reTourOutputPath}";
+                    if (File.Exists(notesTemplatePath))
+                    {
+                        generatedPaths += $" and {notesReTourOutputPath}";
+                    }
                 }
 
                 booking = new TransferBooking
