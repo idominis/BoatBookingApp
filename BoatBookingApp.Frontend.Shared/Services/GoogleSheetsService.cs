@@ -170,7 +170,8 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 int columnIndex;
                 if (boatName != null)
                 {
-                    string headerRange = "2025!C1:T1"; // Ažurirano na C1:T1 zbog novog stupca
+                    // Update header range for boats
+                    string headerRange = "2025!C1:U1"; // was C1:T1
                     var headerRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, headerRange);
                     var headerResponse = await headerRequest.ExecuteAsync();
                     columnIndex = -1;
@@ -195,7 +196,8 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 }
                 else
                 {
-                    string checkRange = $"2025!U{rowIndex}:W{rowIndex}"; // Ažurirano na U:W zbog pomaka
+                    // Update transfer columns
+                    string checkRange = $"2025!V{rowIndex}:X{rowIndex}"; // was U:W
                     var checkRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, checkRange);
                     var checkResponse = await checkRequest.ExecuteAsync();
 
@@ -256,15 +258,16 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
                 if (boatName == null)
                 {
-                    string noteRange = $"2025!X{rowIndex}"; // Ažurirano na X zbog pomaka
+                    // Update notes column
+                    string noteRange = $"2025!Y{rowIndex}"; // was X
                     var noteGetRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, noteRange);
                     var noteGetResponse = await noteGetRequest.ExecuteAsync();
                     string existingNote = noteGetResponse.Values != null && noteGetResponse.Values.Count > 0 && noteGetResponse.Values[0].Count > 0
                         ? noteGetResponse.Values[0][0].ToString()
                         : "";
-                    Console.WriteLine($"Postojeća napomena u X: {existingNote}");
+                    Console.WriteLine($"Postojeća napomena u Y: {existingNote}");
 
-                    string transferPrefix = (columnIndex - 21) switch // Ažurirano na 21 (stupac U)
+                    string transferPrefix = (columnIndex - 22) switch
                     {
                         0 => "T1",
                         1 => "T2",
