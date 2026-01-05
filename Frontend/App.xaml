@@ -6,6 +6,11 @@
     <Application.Resources>
         <ResourceDictionary>
 
+            <SolidColorBrush x:Key="AcrylicBackgroundFillColorDefaultBrush" Color="#F3F3F3"/>
+            <SolidColorBrush x:Key="SystemControlAcrylicWindowBrush" Color="#F3F3F3"/>
+            <SolidColorBrush x:Key="SystemControlBackgroundAltHighBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="SystemControlPageBackgroundChromeLowBrush" Color="#F3F3F3"/>
+            
             <Color x:Key="PageBackgroundColor">#512bdf</Color>
             <Color x:Key="PrimaryTextColor">White</Color>
 

@@ -7,14 +7,18 @@
             InitializeComponent();
         }
 
-#if WINDOWS
         protected override Window CreateWindow(IActivationState? activationState)
         {
-            var window = new Window(new MainPage());
-            window.Width = 600;
-            window.Height = 850;
+#if WINDOWS
+            var window = new Window(new MainPage())
+            {
+                Width = 600,
+                Height = 850
+            };
             return window;
-        }
+#else
+            return new Window(new AppShell());
 #endif
+        }
     }
 }

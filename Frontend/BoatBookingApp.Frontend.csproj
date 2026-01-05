@@ -3,16 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>net9.0-android;net9.0-ios;net9.0-maccatalyst</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net9.0-windows10.0.19041.0</TargetFrameworks>
-    <!-- Uncomment to also build the tizen app. You will need to install tizen by following this: https://github.com/Samsung/Tizen.NET -->
-    <!-- <TargetFrameworks>$(TargetFrameworks);net9.0-tizen</TargetFrameworks> -->
-
-    <!-- Note for MacCatalyst:
-      The default runtime is maccatalyst-x64, except in Release config, in which case the default is maccatalyst-x64;maccatalyst-arm64.
-      When specifying both architectures, use the plural <RuntimeIdentifiers> instead of the singular <RuntimeIdentifier>.
-      The Mac App Store will NOT accept apps with ONLY maccatalyst-arm64 indicated;
-      either BOTH runtimes must be indicated or ONLY macatalyst-x64. -->
-    <!-- For example: <RuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</RuntimeIdentifiers> -->
-
+  
     <OutputType>Exe</OutputType>
     <RootNamespace>BoatBookingApp.Frontend</RootNamespace>
     <UseMaui>true</UseMaui>
@@ -21,8 +12,7 @@
     <EnableDefaultCssItems>false</EnableDefaultCssItems>
     <Nullable>enable</Nullable>
 
-    <!-- Display name -->
-    <ApplicationTitle>BoatBookingApp.Frontend</ApplicationTitle>
+    <ApplicationTitle>Boat Booking</ApplicationTitle>
 
     <!-- App Identifier -->
     <ApplicationId>com.companyname.boatbookingapp.frontend</ApplicationId>
@@ -31,9 +21,12 @@
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
 
-    <!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
-    <WindowsPackageType>None</WindowsPackageType>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
 
+    <!-- Windows settings -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
@@ -43,11 +36,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- App Icon -->
-    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" Color="#0077BE" />
 
     <!-- Splash Screen -->
-    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#0077BE" BaseSize="128,128" />
 
     <!-- Images -->
     <MauiImage Include="Resources\Images\*" />
@@ -58,6 +50,17 @@
 
     <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
     <MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+    
+    <!-- DODANO: appsettings.json kao MauiAsset -->
+    <MauiAsset Include="appsettings.json" />
+    
+    <!-- DODANO: Google Sheets credentials JSON kao MauiAsset -->
+    <MauiAsset Include="wwwroot\speedboatbookingapp-e48f775027f5.json">
+      <LogicalName>speedboatbookingapp-e48f775027f5.json</LogicalName>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </MauiAsset>
+    
+    <MauiAsset Include="wwwroot\images\**\*.*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -66,6 +69,10 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="9.0.50" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.3" />
     <PackageReference Include="MudBlazor" Version="8.3.0" />
+    
+    <!-- DODANO: WindowsAppSDK za WinUI resurse -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250205002" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.1742" Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'" />
   </ItemGroup>
 
   <ItemGroup>
@@ -73,9 +80,42 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Update="wwwroot\templates\BookingConfirmation_Boat_Template.docx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <MauiXaml Update="AppShell.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </MauiXaml>
+    <MauiXaml Update="Platforms\Windows\App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </MauiXaml>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="wwwroot\images\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PROMIJENJENO: Template fajlovi s LogicalName -->
+    <MauiAsset Include="wwwroot\templates\BookingConfirmation_BoatHvar_Template.docx">
+      <LogicalName>BookingConfirmation_BoatHvar_Template.docx</LogicalName>
+    </MauiAsset>
+    <MauiAsset Include="wwwroot\templates\BookingConfirmation_Boat_Template.docx">
+      <LogicalName>BookingConfirmation_Boat_Template.docx</LogicalName>
+    </MauiAsset>
+    <MauiAsset Include="wwwroot\templates\Notes_Boat_Template.docx">
+      <LogicalName>Notes_Boat_Template.docx</LogicalName>
+    </MauiAsset>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Transfer templates -->
+    <MauiAsset Include="wwwroot\templates\BookingConfirmation_Transfer_Template.docx">
+      <LogicalName>BookingConfirmation_Transfer_Template.docx</LogicalName>
+    </MauiAsset>
+    <MauiAsset Include="wwwroot\templates\BookingConfirmation_TransferHvar_Template.docx">
+      <LogicalName>BookingConfirmation_TransferHvar_Template.docx</LogicalName>
+    </MauiAsset>
+    <MauiAsset Include="wwwroot\templates\Notes_Transfer_Template.docx">
+      <LogicalName>Notes_Transfer_Template.docx</LogicalName>
+    </MauiAsset>
   </ItemGroup>
 
 </Project>

@@ -12,7 +12,7 @@
 <MudLayout>
     <MudAppBar Elevation="1">
         <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())" />
-        <MudText Typo="Typo.h5" Class="ml-3">Boat Booking App</MudText>
+        <MudText Typo="Typo.h5" Class="ml-3">Bumbar App</MudText>
         <MudSpacer />
         <MudToolBarContent Class="d-flex justify-end">
             <MudSelect T="string" Label="Booker" Value="@BookerState.SelectedBookerShortName" ValueChanged="@((string shortName) => OnBookerChanged(shortName))"
@@ -41,12 +41,25 @@
 
     protected override async Task OnInitializedAsync()
     {
-        using var dbContext = DbContextFactory.CreateDbContext();
-        bookers = await dbContext.Bookers.ToListAsync();
-
-        var defaultBooker = bookers.FirstOrDefault(b => b.ShortName == "ID");
-        if (defaultBooker != null)
+        try
         {
+            using var dbContext = DbContextFactory.CreateDbContext();
+            bookers = await dbContext.Bookers.ToListAsync();
+
+            var defaultBooker = bookers.FirstOrDefault(b => b.ShortName == "ID");
+            if (defaultBooker != null)
+            {
+                BookerState.SetSelectedBookerShortName("ID");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Blazor] Greška kod dohvaćanja bookera: {ex.Message}");
+            // Dummy podaci za test
+            bookers = new List<Booker>
+            {
+                new Booker { Id = 1, Name = "Test Booker", ShortName = "ID" }
+            };
             BookerState.SetSelectedBookerShortName("ID");
         }
     }

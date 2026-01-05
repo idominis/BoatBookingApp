@@ -10,87 +10,95 @@
 <MudContainer MaxWidth="MaxWidth.Medium">
     <MudText Typo="Typo.h4" GutterBottom="true">Transfer Booking</MudText>
 
-    <MudForm @ref="form" @bind-IsValid="@isFormValid">
-        <MudSwitch T="bool" Value="withReTour" ValueChanged="OnWithReTourChanged"
-                   Color="MudBlazor.Color.Primary" Label="With ReTour" Class="my-custom-switch" />
+    @if (!isInitialized)
+    {
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+        <MudText>Loading...</MudText>
+    }
+    else
+    {
+        <MudForm @ref="form" @bind-IsValid="@isFormValid">
+            <MudSwitch T="bool" Value="withReTour" ValueChanged="OnWithReTourChanged"
+                       Color="MudBlazor.Color.Primary" Label="With ReTour" Class="my-custom-switch" />
 
-        <MudDatePicker Label="Departure Date" @bind-Date="booking.DepartureDate" Required="true" />
-        <MudTimePicker Label="Departure Time" @bind-Time="booking.DepartureTime" Required="true" />
+            <MudDatePicker Label="Departure Date" @bind-Date="booking.DepartureDate" Required="true" />
+            <MudTimePicker Label="Departure Time" @bind-Time="booking.DepartureTime" Required="true" />
 
-        @if (withReTour)
-        {
-            <MudDatePicker Label="ReTour Date" @bind-Date="booking.ReTourDate" Required="true" />
-            <MudTimePicker Label="ReTour Time" @bind-Time="booking.ReTourTime" Required="true" />
-        }
-
-        <MudSelect T="int?" Label="Departure Location" @bind-Value="selectedDepartureLocationId" Required="false" Class="wide-select"
-                   ToStringFunc="@(id => id == null ? "Custom" : locations.FirstOrDefault(l => l.Id == id)?.Name ?? "")">
-            <MudSelectItem Value="@((int?)null)">Custom</MudSelectItem>
-            @foreach (var location in locations)
+            @if (withReTour)
             {
-                <MudSelectItem Value="@((int?)location.Id)">@location.Name</MudSelectItem>
+                <MudDatePicker Label="ReTour Date" @bind-Date="booking.ReTourDate" Required="true" />
+                <MudTimePicker Label="ReTour Time" @bind-Time="booking.ReTourTime" Required="true" />
             }
-        </MudSelect>
-        @if (selectedDepartureLocationId == null)
-        {
+
+            <MudSelect T="int?" Label="Departure Location" @bind-Value="selectedDepartureLocationId" Required="false" Class="wide-select"
+                       ToStringFunc="@(id => id == null ? "Custom" : locations.FirstOrDefault(l => l.Id == id)?.Name ?? "")">
+                <MudSelectItem Value="@((int?)null)">Custom</MudSelectItem>
+                @foreach (var location in locations)
+                {
+                    <MudSelectItem Value="@((int?)location.Id)">@location.Name</MudSelectItem>
+                }
+            </MudSelect>
+            @if (selectedDepartureLocationId == null)
+            {
+                <MudGrid>
+                    <MudItem xs="6">
+                        <MudTextField Label="Custom Departure Location" @bind-Value="booking.CustomDepartureLocation" Required="true" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTextField Label="Custom Departure Name" @bind-Value="booking.CustomDepartureLocationName" Required="true" />
+                    </MudItem>
+                </MudGrid>
+            }
+
+            <MudSelect T="int?" Label="Arrival Location" @bind-Value="selectedArrivalLocationId" Required="false" Class="wide-select"
+                       ToStringFunc="@(id => id == null ? "Custom" : locations.FirstOrDefault(l => l.Id == id)?.Name ?? "")">
+                <MudSelectItem Value="@((int?)null)">Custom</MudSelectItem>
+                @foreach (var location in locations)
+                {
+                    <MudSelectItem Value="@((int?)location.Id)">@location.Name</MudSelectItem>
+                }
+            </MudSelect>
+            @if (selectedArrivalLocationId == null)
+            {
+                <MudGrid>
+                    <MudItem xs="6">
+                        <MudTextField Label="Custom Arrival Location" @bind-Value="booking.CustomArrivalLocation" Required="true" />
+                    </MudItem>
+                    <MudItem xs="6">
+                        <MudTextField Label="Custom Arrival Name" @bind-Value="booking.CustomArrivalLocationName" Required="true" />
+                    </MudItem>
+                </MudGrid>
+            }
+
+            <MudNumericField @bind-Value="booking.PassengerCount" Label="Number of Passengers" Min="1" Required="true" />
+
+            <MudSwitch T="bool" Value="luggage" ValueChanged="OnLuggageChanged"
+                       Color="MudBlazor.Color.Primary" Label="Luggage" Class="my-custom-switch" />
+
+            <MudSwitch T="bool" Value="fuelIncluded" ValueChanged="OnFuelIncludedChanged"
+                       Color="MudBlazor.Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
+
             <MudGrid>
-                <MudItem xs="6">
-                    <MudTextField Label="Custom Departure Location" @bind-Value="booking.CustomDepartureLocation" Required="true" />
+                <MudItem xs="4">
+                    <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
                 </MudItem>
-                <MudItem xs="6">
-                    <MudTextField Label="Custom Departure Name" @bind-Value="booking.CustomDepartureLocationName" Required="true" />
+                <MudItem xs="4">
+                    <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
+                </MudItem>
+                <MudItem xs="4">
+                    <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
                 </MudItem>
             </MudGrid>
-        }
 
-        <MudSelect T="int?" Label="Arrival Location" @bind-Value="selectedArrivalLocationId" Required="false" Class="wide-select"
-                   ToStringFunc="@(id => id == null ? "Custom" : locations.FirstOrDefault(l => l.Id == id)?.Name ?? "")">
-            <MudSelectItem Value="@((int?)null)">Custom</MudSelectItem>
-            @foreach (var location in locations)
-            {
-                <MudSelectItem Value="@((int?)location.Id)">@location.Name</MudSelectItem>
-            }
-        </MudSelect>
-        @if (selectedArrivalLocationId == null)
-        {
-            <MudGrid>
-                <MudItem xs="6">
-                    <MudTextField Label="Custom Arrival Location" @bind-Value="booking.CustomArrivalLocation" Required="true" />
-                </MudItem>
-                <MudItem xs="6">
-                    <MudTextField Label="Custom Arrival Name" @bind-Value="booking.CustomArrivalLocationName" Required="true" />
-                </MudItem>
-            </MudGrid>
-        }
+            <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
+            <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
 
-        <MudNumericField @bind-Value="booking.PassengerCount" Label="Number of Passengers" Min="1" Required="true" />
+            <MudCheckBox T="bool" @bind-Checked="generateDocument" ValueChanged="OnGenerateDocumentChanged" Label="Generate Confirmation Document" />
 
-        <MudSwitch T="bool" Value="luggage" ValueChanged="OnLuggageChanged"
-                   Color="MudBlazor.Color.Primary" Label="Luggage" Class="my-custom-switch" />
-
-        <MudSwitch T="bool" Value="fuelIncluded" ValueChanged="OnFuelIncludedChanged"
-                   Color="MudBlazor.Color.Primary" Label="Fuel Included" Class="my-custom-switch" />
-
-        <MudGrid>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Name" @bind-Value="booking.RenterName" Required="true" />
-            </MudItem>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Email" @bind-Value="booking.RenterEmail" Required="true" InputType="InputType.Email" />
-            </MudItem>
-            <MudItem xs="4">
-                <MudTextField Label="Renter Phone" @bind-Value="booking.RenterPhone" Required="true" InputType="InputType.Telephone" />
-            </MudItem>
-        </MudGrid>
-
-        <MudNumericField @bind-Value="booking.TotalPrice" Label="Total Price" Min="0" Required="true" />
-        <MudNumericField @bind-Value="booking.DepositPaid" Label="Deposit Paid" Min="0" Required="true" />
-
-        <MudCheckBox T="bool" @bind-Checked="generateDocument" ValueChanged="OnGenerateDocumentChanged" Label="Generate Confirmation Document" />
-
-        <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="@(isLoading ? "display: block; margin: 20px auto;" : "display: none;")" />
-        <MudButton Variant="Variant.Filled" Color="MudBlazor.Color.Primary" Disabled="@(!isFormValid || isSubmitting)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
-    </MudForm>
+            <MudProgressCircular Color="Color.Primary" Size="Size.Medium" Indeterminate="true" Style="@(isLoading ? "display: block; margin: 20px auto;" : "display: none;")" />
+            <MudButton Variant="Variant.Filled" Color="MudBlazor.Color.Primary" Disabled="@(!isFormValid || isSubmitting)" OnClick="Submit" Class="mt-4">Send Booking</MudButton>
+        </MudForm>
+    }
 </MudContainer>
 
 @code {
@@ -114,21 +122,34 @@
     private bool generateDocument = false;
     private bool isLoading = false;
     private bool isSubmitting = false;
+    private bool isInitialized = false; // DODANO
     private List<Location> locations = new List<Location>();
     private int? selectedDepartureLocationId;
     private int? selectedArrivalLocationId;
 
     protected override async Task OnInitializedAsync()
     {
-        booking = new TransferBooking
+        try
+        {
+            booking = new TransferBooking
             {
                 WithReTour = withReTour,
                 Luggage = luggage,
                 FuelIncluded = fuelIncluded
             };
 
-        using var dbContext = DbContextFactory.CreateDbContext();
-        locations = await dbContext.Locations.AsNoTracking().ToListAsync();
+            // Asinkrono učitavanje podataka
+            using var dbContext = await Task.Run(() => DbContextFactory.CreateDbContext());
+            locations = await dbContext.Locations.AsNoTracking().ToListAsync();
+            
+            isInitialized = true;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error initializing form: {ex.Message}");
+            Snackbar.Add($"Error loading form: {ex.Message}", Severity.Error);
+        }
     }
 
     private void OnWithReTourChanged(bool value)
@@ -227,14 +248,8 @@
                     ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Name ?? "N/A"
                     : booking.CustomArrivalLocationName ?? "N/A";
                 string shortName = BookerState.SelectedBookerShortName ?? "N/A";
-                string pickUpMapLink = selectedDepartureLocationId.HasValue
-                    ? locations.FirstOrDefault(l => l.Id == selectedDepartureLocationId)?.Link?.Trim() ?? "N/A"
-                    : booking.CustomDepartureLocation?.Trim() ?? "N/A";
-                string dropOffMapLink = selectedArrivalLocationId.HasValue
-                    ? locations.FirstOrDefault(l => l.Id == selectedArrivalLocationId)?.Link?.Trim() ?? "N/A"
-                    : booking.CustomArrivalLocation?.Trim() ?? "N/A";
 
-                Console.WriteLine($"Upis u Google Sheet: pickUpLocation={pickUpLocation}, dropOffLocation={dropOffLocation}, DepartureDate={booking.DepartureDate}");
+                // Google Sheets upis (već imaš ovo)
                 try
                 {
                     bool exists = await GoogleSheetsService.CheckExistingTransfer(booking.DepartureDate.Value, pickUpLocation, dropOffLocation, booking.PassengerCount, booking.DepartureTime);
@@ -301,9 +316,7 @@
                     }
                 }
 
-                string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmationTemplate.docx");
-                // Add Notes template path
-                string notesTemplatePath = Path.Combine("wwwroot", "templates", "Notes_Transfer_Template.docx");
+                // Document generation
                 string baseFileName = $"BookingConfirmation_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
                 string notesBaseFileName = $"Notes_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
                 string departureDateStr = booking.DepartureDate?.ToString("dd-MM-yyyy") ?? "N/A";
@@ -312,91 +325,89 @@
                 string sanitizedDropOff = Regex.Replace(dropOffLocation, @"[^a-zA-Z0-9\s_-]", "");
                 string subFolderName = $"{booking.Id}_Transfer_{sanitizedPickUp}-{sanitizedDropOff}_{departureDateStr}_{renterName}";
 
+                // Determine base path (Android vs Windows)
                 string basePath;
-                try
-                {
-                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
-                    string subFolderPath = Path.Combine(basePath, subFolderName);
-                    Console.WriteLine($"Kreiranje mape: {subFolderPath}");
-                    Directory.CreateDirectory(subFolderPath);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
-                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025");
-                    string subFolderPath = Path.Combine(basePath, subFolderName);
-                    Console.WriteLine($"Kreiranje fallback mape: {subFolderPath}");
-                    Directory.CreateDirectory(subFolderPath);
-                }
+#if ANDROID
+    basePath = Path.Combine(Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDocuments).AbsolutePath, "BumbarRent", "Booking_confirmations", "2025");
+#elif WINDOWS
+    try
+    {
+        basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
+        if (!Directory.Exists(Path.GetDirectoryName(basePath)))
+        {
+            throw new DirectoryNotFoundException("OneDrive folder not found");
+        }
+    }
+    catch
+    {
+        basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confirmations", "2025");
+    }
+#else
+    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confirmations", "2025");
+#endif
 
+                string subFolderPath = Path.Combine(basePath, subFolderName);
+                Console.WriteLine($"Kreiranje mape: {subFolderPath}");
+                Directory.CreateDirectory(subFolderPath);
+
+                // File paths
                 string tourFileName = $"{baseFileName}_Tour.docx";
                 string notesTourFileName = $"{notesBaseFileName}_Tour.docx";
-                string tourOutputPath = Path.Combine(basePath, subFolderName, tourFileName);
-                string notesTourOutputPath = Path.Combine(basePath, subFolderName, notesTourFileName);
-                Console.WriteLine($"Generiranje dokumenta: {tourOutputPath}");
-                Console.WriteLine($"Generiranje Notes dokumenta: {notesTourOutputPath}");
+                string tourOutputPath = Path.Combine(subFolderPath, tourFileName);
+                string notesTourOutputPath = Path.Combine(subFolderPath, notesTourFileName);
 
-                // Generate main Tour document
-                DocumentGenerationService.GenerateDocument(booking, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, locations, templatePath, tourOutputPath);
+                // Template file names
+                string tourTemplateFileName = booking.DepartureLocationId == 7 
+                    ? "BookingConfirmation_TransferHvar_Template.docx"
+                    : "BookingConfirmation_Transfer_Template.docx";
+                string notesTourTemplateFileName = "Notes_Transfer_Template.docx";
 
-                // Generate Notes Tour document with Croatian date format
-                if (File.Exists(notesTemplatePath))
-                {
-                    DocumentGenerationService.GenerateDocument(booking, pickUpLocation, dropOffLocation, pickUpMapLink, dropOffMapLink, locations, notesTemplatePath, notesTourOutputPath, true);
-                }
+                Console.WriteLine($"Generiranje Tour dokumenta: {tourOutputPath}");
+                Console.WriteLine($"Generiranje Notes Tour dokumenta: {notesTourOutputPath}");
 
-                string generatedPaths = $"Tour documents generated at: {tourOutputPath}";
-                if (File.Exists(notesTemplatePath))
-                {
-                    generatedPaths += $" and {notesTourOutputPath}";
-                }
+                // Generate Tour documents
+                await DocumentGenerationService.GenerateTransferDocumentAsync(
+                    booking, pickUpLocation, dropOffLocation, 
+                    tourTemplateFileName, tourOutputPath, 
+                    isReTour: false, isNotesTemplate: false
+                );
 
+                await DocumentGenerationService.GenerateTransferDocumentAsync(
+                    booking, pickUpLocation, dropOffLocation, 
+                    notesTourTemplateFileName, notesTourOutputPath, 
+                    isReTour: false, isNotesTemplate: true
+                );
+
+                string generatedPaths = $"Tour documents generated at: {tourOutputPath} and {notesTourOutputPath}";
+
+                // Generate ReTour documents if applicable
                 if (withReTour && booking.ReTourDate.HasValue)
                 {
                     string reTourFileName = $"{baseFileName}_ReTour.docx";
                     string notesReTourFileName = $"{notesBaseFileName}_ReTour.docx";
-                    string reTourOutputPath = Path.Combine(basePath, subFolderName, reTourFileName);
-                    string notesReTourOutputPath = Path.Combine(basePath, subFolderName, notesReTourFileName);
-
-                    var reTourBooking = new TransferBooking
-                        {
-                            RenterName = booking.RenterName,
-                            RenterPhone = booking.RenterPhone,
-                            RenterEmail = booking.RenterEmail,
-                            DepartureDate = booking.ReTourDate,
-                            DepartureTime = booking.ReTourTime,
-                            PassengerCount = booking.PassengerCount,
-                            Luggage = booking.Luggage,
-                            FuelIncluded = booking.FuelIncluded,
-                            TotalPrice = booking.TotalPrice,
-                            DepositPaid = booking.DepositPaid
-                        };
+                    string reTourOutputPath = Path.Combine(subFolderPath, reTourFileName);
+                    string notesReTourOutputPath = Path.Combine(subFolderPath, notesReTourFileName);
 
                     Console.WriteLine($"Generiranje ReTour dokumenta: {reTourOutputPath}");
                     Console.WriteLine($"Generiranje Notes ReTour dokumenta: {notesReTourOutputPath}");
-                    
-                    // Generate main ReTour document
-                    DocumentGenerationService.GenerateDocument(reTourBooking, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, locations, templatePath, reTourOutputPath);
-                    
-                    // Generate Notes ReTour document with Croatian date format
-                    if (File.Exists(notesTemplatePath))
-                    {
-                        DocumentGenerationService.GenerateDocument(reTourBooking, dropOffLocation, pickUpLocation, dropOffMapLink, pickUpMapLink, locations, notesTemplatePath, notesReTourOutputPath, true);
-                    }
-                    
-                    generatedPaths += $"\nReTour documents generated at: {reTourOutputPath}";
-                    if (File.Exists(notesTemplatePath))
-                    {
-                        generatedPaths += $" and {notesReTourOutputPath}";
-                    }
+
+                    await DocumentGenerationService.GenerateTransferDocumentAsync(
+                        booking, dropOffLocation, pickUpLocation, 
+                        tourTemplateFileName, reTourOutputPath, 
+                        isReTour: true, isNotesTemplate: false
+                    );
+
+                    await DocumentGenerationService.GenerateTransferDocumentAsync(
+                        booking, dropOffLocation, pickUpLocation, 
+                        notesTourTemplateFileName, notesReTourOutputPath, 
+                        isReTour: true, isNotesTemplate: true
+                    );
+
+                    generatedPaths += $"\nReTour documents generated at: {reTourOutputPath} and {notesReTourOutputPath}";
                 }
 
-                booking = new TransferBooking
-                    {
-                        WithReTour = false,
-                        Luggage = true,
-                        FuelIncluded = true
-                    };
+                // Reset form and show success message
+                booking = new TransferBooking { WithReTour = false, Luggage = true, FuelIncluded = true };
                 withReTour = false;
                 luggage = true;
                 fuelIncluded = true;

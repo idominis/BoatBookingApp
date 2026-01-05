@@ -18,43 +18,56 @@ namespace BoatBookingApp.Frontend.Shared.Services
 {
     public class GoogleSheetsService
     {
-        private readonly SheetsService sheetsService;
-        private readonly string spreadsheetId;
+        private readonly SheetsService? sheetsService;
+        private readonly string? spreadsheetId;
         private readonly IDbContextFactory<BoatBookingContext> dbContextFactory;
         private const int EVIDENCIJA_SHEET_ID = 1240119258;
         private const int SHEET_2025_ID = 300482270;
+        private readonly bool _isInitialized;
 
-        public GoogleSheetsService(IConfiguration configuration, IDbContextFactory<BoatBookingContext> dbContextFactory)
+        public GoogleSheetsService(
+            IConfiguration configuration, 
+            IDbContextFactory<BoatBookingContext> dbContextFactory,
+            IFileProvider fileProvider) // DODANO
         {
             this.dbContextFactory = dbContextFactory;
-            var credentialsPath = configuration["GoogleSheets:CredentialsPath"];
-            spreadsheetId = configuration["GoogleSheets:SpreadsheetId"];
+            
+            try
+            {
+                spreadsheetId = configuration["GoogleSheets:SpreadsheetId"];
+                
+                // Koristi IFileProvider umjesto direktnog FileSystem pristupa
+                string jsonFileName = "speedboatbookingapp-e48f775027f5.json";
+                
+                var stream = fileProvider.OpenAppPackageFileAsync(jsonFileName).Result;
+                
+                if (stream == null)
+                {
+                    Console.WriteLine($"GoogleSheetsService: JSON key file '{jsonFileName}' not found. Service will run in offline mode.");
+                    _isInitialized = false;
+                    return;
+                }
 
-            if (string.IsNullOrEmpty(credentialsPath))
-            {
-                throw new ArgumentNullException(nameof(credentialsPath), "GoogleSheets:CredentialsPath nije definiran u appsettings.json.");
-            }
-            if (string.IsNullOrEmpty(spreadsheetId))
-            {
-                throw new ArgumentNullException(nameof(spreadsheetId), "GoogleSheets:SpreadsheetId nije definiran u appsettings.json.");
-            }
+                using (stream)
+                {
+                    var credential = GoogleCredential.FromStream(stream)
+                        .CreateScoped(new[] { SheetsService.Scope.Spreadsheets });
 
-            if (!File.Exists(credentialsPath))
-            {
-                throw new FileNotFoundException($"JSON ključ nije pronađen na putanji: {credentialsPath}");
+                    sheetsService = new SheetsService(new BaseClientService.Initializer
+                    {
+                        HttpClientInitializer = credential,
+                        ApplicationName = "Boat Booking App"
+                    });
+                
+                    _isInitialized = true;
+                    Console.WriteLine("GoogleSheetsService initialized successfully.");
+                }
             }
-
-            GoogleCredential credential;
-            using (var stream = new FileStream(credentialsPath, FileMode.Open, FileAccess.Read))
+            catch (Exception ex)
             {
-                credential = GoogleCredential.FromStream(stream).CreateScoped(SheetsService.Scope.Spreadsheets);
+                Console.WriteLine($"GoogleSheetsService initialization error: {ex.Message}");
+                _isInitialized = false;
             }
-
-            sheetsService = new SheetsService(new BaseClientService.Initializer()
-            {
-                HttpClientInitializer = credential,
-                ApplicationName = "BumbarRentSheets"
-            });
         }
 
         private string NormalizeLocationName(string name)
@@ -77,6 +90,12 @@ namespace BoatBookingApp.Frontend.Shared.Services
 
         public async Task<bool> CheckExistingTransfer(DateTime date, string pickUpLocation, string dropOffLocation, int passengerCount, TimeSpan? time)
         {
+            if (!_isInitialized || sheetsService == null)
+            {
+                Console.WriteLine("GoogleSheetsService not initialized, skipping CheckExistingTransfer");
+                return false;
+            }
+
             try
             {
                 string dateStr = date.ToString("d.M.", CultureInfo.InvariantCulture);
@@ -115,8 +134,14 @@ namespace BoatBookingApp.Frontend.Shared.Services
             }
         }
 
-        public async Task UpdateGoogleSheet(DateTime date, string pickUpLocation, string dropOffLocation, int passengerCount, TimeSpan? time, string shortName, string boatName = null, bool skipperRequired = false)
+        public async Task UpdateGoogleSheet(DateTime date, string? pickUpLocation, string? dropOffLocation, int passengerCount, TimeSpan? time, string shortName, string? boatName = null, bool skipperRequired = false)
         {
+            if (!_isInitialized || sheetsService == null)
+            {
+                Console.WriteLine("GoogleSheetsService not initialized, skipping UpdateGoogleSheet");
+                return;
+            }
+
             try
             {
                 string dateStr = date.ToString("d.M.", CultureInfo.InvariantCulture);

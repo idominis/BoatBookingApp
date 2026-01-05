@@ -1,0 +1,38 @@
+﻿@page "/"
+
+<div class="welcome-container">
+    <img src="images/speedboat.jpg" alt="Speedboat" class="speedboat-image" />
+    <h2 class="welcome-text">Bumbar Rent</h2>
+</div>
+
+<style>
+    .welcome-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        min-height: 60vh;
+    }
+
+    .speedboat-image {
+        max-width: 80%;
+        height: auto;
+        border-radius: 12px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        margin-bottom: 20px;
+    }
+
+    .welcome-text {
+        color: #1976d2;
+        font-weight: 600;
+        text-align: center;
+    }
+
+    /* Responsive za mobile */
+    @@media (max-width: 768px) {
+        .speedboat-image {
+            max-width: 95%;
+        }
+    }
+</style>

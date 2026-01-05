@@ -1,24 +1,25 @@
-﻿using BoatBookingApp.Frontend.Shared.Models;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text.RegularExpressions;
-using Xceed.Words.NET;
-using BoatBookingApp.Frontend.Shared.Utilities;
-using Xceed.Document.NET;
-using Microsoft.EntityFrameworkCore;
+﻿using Xceed.Words.NET;
+using BoatBookingApp.Frontend.Shared.Models;
 using BoatBookingApp.Frontend.Shared.Data;
+using Microsoft.EntityFrameworkCore;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using Xceed.Document.NET;
+using BoatBookingApp.Frontend.Shared.Utilities;
 
 namespace BoatBookingApp.Frontend.Shared.Services
 {
     public class DocumentGenerationService
     {
         private readonly IDbContextFactory<BoatBookingContext> _dbContextFactory;
+        private readonly IFileProvider _fileProvider;
 
-        public DocumentGenerationService(IDbContextFactory<BoatBookingContext> dbContextFactory)
+        public DocumentGenerationService(
+            IDbContextFactory<BoatBookingContext> dbContextFactory,
+            IFileProvider fileProvider)
         {
             _dbContextFactory = dbContextFactory;
+            _fileProvider = fileProvider;
         }
 
         private string NormalizeLocationName(string name)
@@ -29,132 +30,75 @@ namespace BoatBookingApp.Frontend.Shared.Services
             return name;
         }
 
-        public void GenerateDocument(TransferBooking booking, string pickUpLocation, string dropOffLocation, string pickUpMapLink, string dropOffMapLink, List<Location> locations, string templatePath, string outputPath, bool isNotesTemplate = false)
+        public async Task GenerateBoatBookingDocumentAsync(
+            BoatBooking booking, 
+            string pickUpMapLink, 
+            IEnumerable<Extra> selectedExtras, 
+            string templateFileName,
+            string outputPath, 
+            bool isNotesTemplate = false)
         {
-            if (!File.Exists(templatePath))
+            try
             {
-                throw new FileNotFoundException($"Template file not found: {templatePath}");
-            }
-
-            Console.WriteLine($"Generiranje transfer dokumenta: {templatePath} -> {outputPath}");
-            using (var doc = DocX.Load(templatePath))
-            {
-                doc.ReplaceText(new StringReplaceTextOptions
+                using var templateStream = await _fileProvider.OpenAppPackageFileAsync(templateFileName);
+                
+                if (templateStream == null)
                 {
-                    SearchValue = "{ContactName}",
-                    NewValue = booking.RenterName ?? "N/A"
-                });
+                    throw new FileNotFoundException($"Template '{templateFileName}' not found in app package");
+                }
 
-                doc.ReplaceText(new StringReplaceTextOptions
+                using var doc = DocX.Load(templateStream);
+
+                string startDate = isNotesTemplate
+                    ? (booking.StartDate?.ToString("d.M.", new CultureInfo("hr-HR")) ?? "N/A")
+                    : (booking.StartDate?.ToString("dd-MM-yyyy") ?? "N/A");
+                    
+                string endDate = isNotesTemplate
+                    ? (booking.EndDate?.ToString("d.M.", new CultureInfo("hr-HR")) ?? startDate)
+                    : (booking.EndDate?.ToString("dd-MM-yyyy") ?? startDate);
+
+                string pickupTime = booking.PickupTime?.ToString(@"hh\:mm") ?? "N/A";
+                string returnTime = booking.ReturnTime?.ToString(@"hh\:mm") ?? "N/A";
+                string skipperIncluded = booking.SkipperRequired ? "Yes" : "No";
+                string fuelIncluded = booking.FuelIncluded ? "Yes" : "No";
+                string extrasText = selectedExtras.Any() ? string.Join(", ", selectedExtras.Select(e => e.Name)) : "None";
+
+                doc.ReplaceText("<<boat_name>>", booking.BoatName ?? "N/A");
+                doc.ReplaceText("<<start_date>>", startDate);
+                doc.ReplaceText("<<end_date>>", endDate);
+                doc.ReplaceText("<<passenger_count>>", booking.PassengerCount.ToString());
+                doc.ReplaceText("<<pickup_time>>", pickupTime);
+                doc.ReplaceText("<<return_time>>", returnTime);
+                doc.ReplaceText("<<skipper_included>>", skipperIncluded);
+                doc.ReplaceText("<<fuel_included>>", fuelIncluded);
+                doc.ReplaceText("<<total_price>>", $"{booking.TotalPrice:F2} EUR");
+                doc.ReplaceText("<<deposit_paid>>", $"{booking.DepositPaid:F2} EUR");
+                doc.ReplaceText("<<renter_name>>", booking.RenterName ?? "N/A");
+                doc.ReplaceText("<<renter_email>>", booking.RenterEmail ?? "N/A");
+                doc.ReplaceText("<<renter_phone>>", booking.RenterPhone ?? "N/A");
+                doc.ReplaceText("<<extras>>", extrasText);
+
+                if (!string.IsNullOrEmpty(pickUpMapLink))
                 {
-                    SearchValue = "{ContactPhone}",
-                    NewValue = booking.RenterPhone ?? "N/A"
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{PickUpLocation}",
-                    NewValue = pickUpLocation
-                });
-
-                ReplaceTextWithHyperlink(doc, "{PickUpMapLink}", pickUpMapLink, pickUpMapLink);
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{DropOffLocation}",
-                    NewValue = dropOffLocation
-                });
-
-                ReplaceTextWithHyperlink(doc, "{DropOffMapLink}", dropOffMapLink, dropOffMapLink);
-
-                // Different date formatting based on template type
-                string dateFormatted;
-                if (isNotesTemplate)
-                {
-                    // Croatian format dd/MM/yyyy for Notes template
-                    dateFormatted = booking.DepartureDate.HasValue 
-                        ? booking.DepartureDate.Value.ToString("dd/MM/yyyy")
-                        : "N/A";
+                    ReplaceTextWithHyperlink(doc, "<<pickup_location>>", pickUpMapLink, pickUpMapLink);
                 }
                 else
                 {
-                    // English format with ordinal for other templates
-                    dateFormatted = Utility.GetDateWithOrdinal(booking.DepartureDate) ?? "N/A";
+                    doc.ReplaceText("<<pickup_location>>", booking.CustomDepartureLocationName ?? "Custom Location");
                 }
-                
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{Date}",
-                    NewValue = dateFormatted
-                });
 
-                // Add DayOfTheWeak handling
-                string dayOfWeek = booking.DepartureDate.HasValue 
-                    ? booking.DepartureDate.Value.ToString("dddd", System.Globalization.CultureInfo.GetCultureInfo("en-US"))
-                    : "N/A";
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{DayOfTheWeak}",
-                    NewValue = dayOfWeek
-                });
-
-                string timeFormatted = booking.DepartureTime.HasValue
-                    ? $"{booking.DepartureTime.Value.Hours:D2}:{booking.DepartureTime.Value.Minutes:D2}"
-                    : "N/A";
-                Console.WriteLine($"Formatirano vrijeme za dokument: {timeFormatted}");
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{Time}",
-                    NewValue = timeFormatted
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{PassengerCount}",
-                    NewValue = booking.PassengerCount.ToString()
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{SkipperStatus}",
-                    NewValue = "Included in the price"
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{LuggageStatus}",
-                    NewValue = booking.Luggage ? "Included in the price" : "Not included"
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{FuelStatus}",
-                    NewValue = booking.FuelIncluded ? "Included in the price" : "Not included"
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{TotalPrice}",
-                    NewValue = $"{booking.TotalPrice}€"
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{Deposit}",
-                    NewValue = $"{booking.DepositPaid}€"
-                });
-
-                doc.ReplaceText(new StringReplaceTextOptions
-                {
-                    SearchValue = "{RemainingAmount}",
-                    NewValue = $"{booking.TotalPrice - booking.DepositPaid}€"
-                });
-
+                // Save document
                 doc.SaveAs(outputPath);
-                Console.WriteLine($"Transfer dokument spremljen na: {outputPath}");
+                Console.WriteLine($"Document generated successfully: {outputPath}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error generating document: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
             }
         }
 
+        // Existing sync method - keep for backward compatibility
         public void GenerateBoatBookingDocument(BoatBooking booking, string pickUpMapLink, IEnumerable<Extra> selectedExtras, string templatePath, string outputPath, bool isNotesTemplate = false)
         {
             if (!File.Exists(templatePath))
@@ -301,6 +245,206 @@ namespace BoatBookingApp.Frontend.Shared.Services
             }
         }
 
+        public async Task GenerateTransferDocumentAsync(
+            TransferBooking booking,
+            string pickUpLocation,
+            string dropOffLocation,
+            string templateFileName,
+            string outputPath,
+            bool isReTour = false,
+            bool isNotesTemplate = false)
+        {
+            try
+            {
+                using var templateStream = await _fileProvider.OpenAppPackageFileAsync(templateFileName);
+                
+                if (templateStream == null)
+                {
+                    throw new FileNotFoundException($"Template '{templateFileName}' not found in app package");
+                }
+
+                // Load DocX from stream
+                using var doc = DocX.Load(templateStream);
+
+                // Formatting dates
+                string dateFormatted;
+                if (isNotesTemplate)
+                {
+                    var date = isReTour ? booking.ReTourDate : booking.DepartureDate;
+                    dateFormatted = date.HasValue 
+                        ? date.Value.ToString("d.M.", new CultureInfo("hr-HR"))
+                        : "N/A";
+                }
+                else
+                {
+                    var date = isReTour ? booking.ReTourDate : booking.DepartureDate;
+                    dateFormatted = Utility.GetDateWithOrdinal(date) ?? "N/A";
+                }
+
+                // Formatting time
+                var time = isReTour ? booking.ReTourTime : booking.DepartureTime;
+                string timeFormatted = time.HasValue
+                    ? $"{time.Value.Hours:D2}:{time.Value.Minutes:D2}"
+                    : "N/A";
+
+                // Day of week
+                var dateValue = isReTour ? booking.ReTourDate : booking.DepartureDate;
+                string dayOfWeek = dateValue.HasValue 
+                    ? dateValue.Value.ToString("dddd", CultureInfo.GetCultureInfo("en-US"))
+                    : "N/A";
+
+                // Replace placeholders
+                doc.ReplaceText("<<date>>", dateFormatted);
+                doc.ReplaceText("<<day_of_week>>", dayOfWeek);
+                doc.ReplaceText("<<time>>", timeFormatted);
+                doc.ReplaceText("<<pickup_location>>", pickUpLocation);
+                doc.ReplaceText("<<dropoff_location>>", dropOffLocation);
+                doc.ReplaceText("<<passenger_count>>", booking.PassengerCount.ToString());
+                doc.ReplaceText("<<luggage>>", booking.Luggage ? "Yes" : "No");
+                doc.ReplaceText("<<total_price>>", $"{booking.TotalPrice:F2} EUR");
+                doc.ReplaceText("<<deposit_paid>>", $"{booking.DepositPaid:F2} EUR");
+                doc.ReplaceText("<<remaining_amount>>", $"{(booking.TotalPrice - booking.DepositPaid):F2} EUR");
+                doc.ReplaceText("<<renter_name>>", booking.RenterName ?? "N/A");
+                doc.ReplaceText("<<renter_email>>", booking.RenterEmail ?? "N/A");
+
+                // Save document
+                doc.SaveAs(outputPath);
+                Console.WriteLine($"Transfer document generated successfully: {outputPath}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error generating transfer document: {ex.Message}, StackTrace: {ex.StackTrace}");
+                throw;
+            }
+        }
+
+        // LEGACY SYNC METHOD - Keep for backward compatibility (Windows desktop app)
+        public void GenerateDocument(
+            TransferBooking booking,
+            string pickUpLocation,
+            string dropOffLocation,
+            string templatePath,
+            string outputPath,
+            bool isReTour = false,
+            bool isNotesTemplate = false)
+        {
+            if (!File.Exists(templatePath))
+            {
+                throw new FileNotFoundException($"Template file not found: {templatePath}");
+            }
+
+            Console.WriteLine($"Generiranje transfer dokumenta: {templatePath} -> {outputPath}");
+            using (var doc = DocX.Load(templatePath))
+            {
+                // Contact info
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{ContactName}",
+                    NewValue = booking.RenterName ?? "Guest"
+                });
+
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{ContactEmail}",
+                    NewValue = booking.RenterEmail ?? "N/A"
+                });
+
+                // Date formatting
+                string dateFormatted;
+                if (isNotesTemplate)
+                {
+                    var date = isReTour ? booking.ReTourDate : booking.DepartureDate;
+                    dateFormatted = date.HasValue 
+                        ? date.Value.ToString("dd/MM/yyyy")
+                        : "N/A";
+                }
+                else
+                {
+                    var date = isReTour ? booking.ReTourDate : booking.DepartureDate;
+                    dateFormatted = Utility.GetDateWithOrdinal(date) ?? "N/A";
+                }
+                
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{Date}",
+                    NewValue = dateFormatted
+                });
+
+                // Day of the week
+                var dateValue = isReTour ? booking.ReTourDate : booking.DepartureDate;
+                string dayOfWeek = dateValue.HasValue 
+                    ? dateValue.Value.ToString("dddd", CultureInfo.GetCultureInfo("en-US"))
+                    : "N/A";
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{DayOfTheWeak}",
+                    NewValue = dayOfWeek
+                });
+
+                // Time formatting
+                var time = isReTour ? booking.ReTourTime : booking.DepartureTime;
+                string timeFormatted = time.HasValue
+                    ? $"{time.Value.Hours:D2}:{time.Value.Minutes:D2}"
+                    : "N/A";
+                Console.WriteLine($"Formatirano vrijeme za dokument: {timeFormatted}");
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{Time}",
+                    NewValue = timeFormatted
+                });
+
+                // Locations
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{PickUpLocation}",
+                    NewValue = pickUpLocation
+                });
+
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{DropOffLocation}",
+                    NewValue = dropOffLocation
+                });
+
+                // Passenger count
+                Console.WriteLine($"Zamjena {{PassengerCount}} s {booking.PassengerCount}");
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{PassengerCount}",
+                    NewValue = booking.PassengerCount.ToString()
+                });
+
+                // Luggage
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{Luggage}",
+                    NewValue = booking.Luggage ? "Yes" : "No"
+                });
+
+                // Prices
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{TotalPrice}",
+                    NewValue = $"{booking.TotalPrice}€"
+                });
+
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{Deposit}",
+                    NewValue = $"{booking.DepositPaid}€"
+                });
+
+                doc.ReplaceText(new StringReplaceTextOptions
+                {
+                    SearchValue = "{RemainingAmount}",
+                    NewValue = $"{booking.TotalPrice - booking.DepositPaid}€"
+                });
+
+                doc.SaveAs(outputPath);
+                Console.WriteLine($"Transfer dokument spremljen na: {outputPath}");
+            }
+        }
+
         private void ReplaceTextWithHyperlink(DocX doc, string placeholder, string displayText, string url)
         {
             if (!string.IsNullOrEmpty(url))
@@ -404,7 +548,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 string transferBasePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025");
                 if (Directory.Exists(transferBasePath))
                 {
-                    // Dohvati sve mape transfera
                     var transferFolders = Directory.GetDirectories(transferBasePath)
                         .Where(d => d.Contains("_Transfer_"))
                         .ToList();
@@ -418,7 +561,6 @@ namespace BoatBookingApp.Frontend.Shared.Services
                             string locationsPart = parts[2];
                             string normalizedDetails = NormalizeLocationName(locationsPart);
 
-                            // Provjeri dokumente u mapi
                             var files = Directory.GetFiles(folder, "*.docx");
                             foreach (var file in files)
                             {

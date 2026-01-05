@@ -12,7 +12,6 @@
 <Router AppAssembly="@typeof(Main).Assembly" AdditionalAssemblies="new[] { typeof(BoatBookingApp.Frontend.Shared.Pages.BoatBookingForm).Assembly }">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="@typeof(MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
     <NotFound>
         <PageTitle>Not found</PageTitle>

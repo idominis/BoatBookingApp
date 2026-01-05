@@ -1,5 +1,4 @@
-﻿@page "/"
-@page "/boat-booking"
+﻿@page "/boat-booking"
 @using Microsoft.EntityFrameworkCore
 @using BoatBookingApp.Frontend.Shared.Models
 @using BoatBookingApp.Frontend.Shared.Layout
@@ -232,12 +231,17 @@
             if (generateDocument)
             {
                 Console.WriteLine($"Pokušaj generiranja dokumenta, booking ID: {booking.Id}");
-                string templatePath = booking.DepartureLocationId == 1
-                    ? Path.Combine("wwwroot", "templates", "BookingConfirmation_BoatHvar_Template.docx")
-                    : Path.Combine("wwwroot", "templates", "BookingConfirmation_Boat_Template.docx");
                 
-                // Add Notes template path
-                string notesTemplatePath = Path.Combine("wwwroot", "templates", "Notes_Boat_Template.docx");
+                // ❌ STARO - ne radi na Androidu:
+                // string templatePath = Path.Combine("wwwroot", "templates", "BookingConfirmation_BoatHvar_Template.docx");
+                
+                // ✅ NOVO - radi na svim platformama:
+                string templatePath = booking.DepartureLocationId == 1
+                    ? "BookingConfirmation_BoatHvar_Template.docx"
+                    : "BookingConfirmation_Boat_Template.docx";
+                
+                string notesTemplatePath = "Notes_Boat_Template.docx";
+                
                 Console.WriteLine($"Koristi predložak: {templatePath}");
                 Console.WriteLine($"Koristi Notes predložak: {notesTemplatePath}");
 
@@ -245,32 +249,45 @@
                 string notesBaseFileName = $"Notes_{booking.Id}_{DateTime.Now:yyyyMMdd_HHmmss}";
                 string startDateStr = booking.StartDate?.ToString("dd-MM-yyyy") ?? "N/A";
                 string renterName = booking.RenterName?.Replace(" ", "_") ?? "Guest";
-                // Sanitizacija imena podmape
                 string sanitizedBoatName = Regex.Replace(booking.BoatName ?? "Unknown", @"[^a-zA-Z0-9\s_-]", "");
                 string sanitizedRenter = Regex.Replace(renterName, @"[^a-zA-Z0-9_-]", "");
                 string subFolderName = $"{booking.Id}_Boat_{sanitizedBoatName}_{startDateStr}_{sanitizedRenter}";
 
+                // ❌ STARO - OneDrive ne postoji na Androidu:
+                // string basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", ...);
+                
+                // ✅ NOVO - koristi Documents folder (radi na svim platformama):
                 string basePath;
+#if ANDROID
+                // Android: koristi External Storage
+                basePath = Path.Combine(Android.OS.Environment.GetExternalStoragePublicDirectory(Android.OS.Environment.DirectoryDocuments).AbsolutePath, "BumbarRent", "Booking_confirmations", "2025", "0_Boats_2025");
+#elif WINDOWS
+                // Windows: pokušaj OneDrive, fallback na Documents
                 try
                 {
                     basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "OneDrive", "BumbarRent", "Booking_confrmations", "2025", "0_Boats_2025");
-                    string subFolderPath = Path.Combine(basePath, subFolderName);
-                    Console.WriteLine($"Pokušaj kreiranja mape: {subFolderPath}");
-                    Directory.CreateDirectory(subFolderPath);
+                    if (!Directory.Exists(Path.GetDirectoryName(basePath)))
+                    {
+                        throw new DirectoryNotFoundException("OneDrive folder not found");
+                    }
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Console.WriteLine($"Failed to save to OneDrive: {ex.Message}, falling back to MyDocuments");
-                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confrmations", "2025", "0_Boats_2025");
-                    string subFolderPath = Path.Combine(basePath, subFolderName);
-                    Console.WriteLine($"Pokušaj kreiranja fallback mape: {subFolderPath}");
-                    Directory.CreateDirectory(subFolderPath);
+                    basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confirmations", "2025", "0_Boats_2025");
                 }
+#else
+                // iOS/Mac: koristi Documents folder
+                basePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BumbarRent", "Booking_confirmations", "2025", "0_Boats_2025");
+#endif
+
+                string subFolderPath = Path.Combine(basePath, subFolderName);
+                Console.WriteLine($"Pokušaj kreiranja mape: {subFolderPath}");
+                Directory.CreateDirectory(subFolderPath);
 
                 string fileName = $"{baseFileName}.docx";
                 string notesFileName = $"{notesBaseFileName}.docx";
-                string outputPath = Path.Combine(basePath, subFolderName, fileName);
-                string notesOutputPath = Path.Combine(basePath, subFolderName, notesFileName);
+                string outputPath = Path.Combine(subFolderPath, fileName);
+                string notesOutputPath = Path.Combine(subFolderPath, notesFileName);
                 Console.WriteLine($"Izlazna putanja dokumenta: {outputPath}");
                 Console.WriteLine($"Izlazna putanja Notes dokumenta: {notesOutputPath}");
 
@@ -279,22 +296,13 @@
                     : booking.CustomDepartureLocation?.Trim() ?? "";
                 Console.WriteLine($"pickUpMapLink: {pickUpMapLink}");
 
-                // Generate main booking confirmation document
-                DocumentGenerationService.GenerateBoatBookingDocument(booking, pickUpMapLink, _selectedExtras, templatePath, outputPath);
+                // Generate documents
+                await DocumentGenerationService.GenerateBoatBookingDocumentAsync(booking, pickUpMapLink, _selectedExtras, templatePath, outputPath);
 
-                // Generate Notes document with Croatian date format
-                if (File.Exists(notesTemplatePath))
-                {
-                    DocumentGenerationService.GenerateBoatBookingDocument(booking, pickUpMapLink, _selectedExtras, notesTemplatePath, notesOutputPath, true);
-                    generatedPaths = $"Documents generated at: {outputPath} and {notesOutputPath}";
-                    Console.WriteLine($"Oba dokumenta generirana, putanje: {generatedPaths}");
-                }
-                else
-                {
-                    Console.WriteLine($"Notes template not found: {notesTemplatePath}");
-                    generatedPaths = $"Document generated at: {outputPath}";
-                    Console.WriteLine($"Dokument generiran, putanja: {generatedPaths}");
-                }
+                await DocumentGenerationService.GenerateBoatBookingDocumentAsync(booking, pickUpMapLink, _selectedExtras, notesTemplatePath, notesOutputPath, true);
+                
+                generatedPaths = $"Documents generated at: {outputPath} and {notesOutputPath}";
+                Console.WriteLine($"Dokumenti generirani, putanje: {generatedPaths}");
             }
 
             // Resetiranje forme nakon uspješnog slanja
