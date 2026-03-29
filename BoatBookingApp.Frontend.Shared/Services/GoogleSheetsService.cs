@@ -109,9 +109,9 @@ namespace BoatBookingApp.Frontend.Shared.Services
                     {
                         if (checkResponse.Values[i].Count > 0 && checkResponse.Values[i][0].ToString() == dateStr)
                         {
-                            if (checkResponse.Values[i].Count > 22 && checkResponse.Values[i][22] != null)
+                            if (checkResponse.Values[i].Count > 24 && checkResponse.Values[i][24] != null)
                             {
-                                string note = checkResponse.Values[i][22].ToString();
+                                string note = checkResponse.Values[i][24].ToString(); // Y kolona umjesto W
                                 string expectedNote = $"T1: {NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}, {passengerCount} osobe, polazak u {time?.ToString("hh\\:mm")}";
                                 string expectedNote2 = $"T2: {NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}, {passengerCount} osobe, polazak u {time?.ToString("hh\\:mm")}";
                                 string expectedNote3 = $"T3: {NormalizeLocationName(pickUpLocation)}-{NormalizeLocationName(dropOffLocation)}, {passengerCount} osobe, polazak u {time?.ToString("hh\\:mm")}";
@@ -222,20 +222,32 @@ namespace BoatBookingApp.Frontend.Shared.Services
                 else
                 {
                     // Update transfer columns
-                    string checkRange = $"2025!V{rowIndex}:X{rowIndex}"; // was U:W
+                    string checkRange = $"2025!V{rowIndex}:X{rowIndex}";
                     var checkRequest = sheetsService.Spreadsheets.Values.Get(spreadsheetId, checkRange);
                     var checkResponse = await checkRequest.ExecuteAsync();
 
+                    // Pronađi prvi prazan slot u transfer kolonama (V=22, W=23, X=24)
                     columnIndex = -1;
-                    if (checkResponse.Values == null || checkResponse.Values.Count == 0 || checkResponse.Values[0].Count < 3)
+                    for (int col = 22; col <= 24; col++) // V, W, X
                     {
-                        columnIndex = checkResponse.Values == null || checkResponse.Values[0].Count == 0 ? 21 : checkResponse.Values[0].Count + 21; // Početak od U (indeks 21)
+                        int relativeIndex = col - 22; // 0, 1, 2
+                        if (checkResponse.Values == null ||
+                            checkResponse.Values.Count == 0 ||
+                            checkResponse.Values[0].Count <= relativeIndex ||
+                            checkResponse.Values[0][relativeIndex] == null ||
+                            string.IsNullOrEmpty(checkResponse.Values[0][relativeIndex].ToString()))
+                        {
+                            columnIndex = col;
+                            break;
+                        }
                     }
-                    else if (checkResponse.Values[0].Count == 3)
+
+                    if (columnIndex == -1)
                     {
                         throw new InvalidOperationException("Tri transfera već bukirana za ovaj datum!");
                     }
                 }
+
 
                 string columnLetter = GetColumnLetter(columnIndex);
                 string shortNameRange = $"2025!{columnLetter}{rowIndex}";
